@@ -1,35 +1,42 @@
-import { useState } from 'react'
-import reactLogo from './assets/react.svg'
-import viteLogo from '/vite.svg'
-import './App.css'
+import { Routes, Route } from "react-router-dom";
+import AdminLayout from "./admin/AdminLayout.jsx";
+
+import DashboardAdmin from "./admin/DashboardAdmin.jsx";
+import TambahSoal from "./admin/TambahSoal.jsx";
+import DaftarSoal from "./admin/DaftarSoal.jsx";
+import EditSoal from "./admin/EditSoal.jsx";
+import HasilUjian from "./admin/HasilUjian.jsx";
+import HasilAkhir from "./admin/HasilAkhir.jsx";
+import TambahPeserta from "./admin/TambahPeserta.jsx";
+
+import PartSoal from "./page/PartSoal.jsx";
+import PartPeserta from "./page/PartPeserta.jsx";
+import LoginPeserta from "./page/LoginPeserta.jsx";
 
 function App() {
-  const [count, setCount] = useState(0)
-
   return (
-    <>
-      <div>
-        <a href="https://vite.dev" target="_blank">
-          <img src={viteLogo} className="logo" alt="Vite logo" />
-        </a>
-        <a href="https://react.dev" target="_blank">
-          <img src={reactLogo} className="logo react" alt="React logo" />
-        </a>
-      </div>
-      <h1>Vite + React</h1>
-      <div className="card">
-        <button onClick={() => setCount((count) => count + 1)}>
-          count is {count}
-        </button>
-        <p>
-          Edit <code>src/App.jsx</code> and save to test HMR
-        </p>
-      </div>
-      <p className="read-the-docs">
-        Click on the Vite and React logos to learn more
-      </p>
-    </>
-  )
+    <Routes>
+      {/* ===================== */}
+      {/* ROUTE ADMIN (dengan sidebar) */}
+      {/* ===================== */}
+      <Route element={<AdminLayout />}>
+        <Route path="/admin/dashboard" element={<DashboardAdmin />} />
+        <Route path="/admin/tambah-soal" element={<TambahSoal />} />
+        <Route path="/admin/daftar-soal" element={<DaftarSoal />} />
+        <Route path="/admin/edit-soal/:id" element={<EditSoal />} />
+        <Route path="/admin/hasil-ujian" element={<HasilUjian />} />
+        <Route path="/admin/hasil/:id" element={<HasilAkhir />} />
+        <Route path="/admin/tambah-peserta" element={<TambahPeserta />} />
+      </Route>
+
+      {/* ===================== */}
+      {/* ROUTE UJIAN (tanpa sidebar) */}
+      {/* ===================== */}
+      <Route path="/ujian/:id" element={<PartSoal />} />
+      <Route path="/peserta" element={<PartPeserta />} />
+      <Route path="/login" element={<LoginPeserta />} />
+    </Routes>
+  );
 }
 
-export default App
+export default App;
