@@ -1,6 +1,25 @@
-import React, { useEffect, useState, useMemo } from "react";
+// File: src/page/PartSoal.jsx (Diperbarui untuk memanggil rute /public/)
+
+import React, {
+  useEffect,
+  useState,
+  useMemo,
+  useCallback,
+  useRef,
+} from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { FaClock, FaCheckCircle, FaRegCircle } from "react-icons/fa";
+import {
+  FaClock,
+  FaCheckCircle,
+  FaRegCircle,
+  FaUser,
+  FaPhoneAlt,
+  FaEnvelope,
+  FaCalendarAlt,
+  FaRegClock,
+  FaInfoCircle,
+} from "react-icons/fa";
+import SubmitUjianModal from "../component/submitujian.jsx";
 
 const API_URL = "http://localhost:5000";
 
@@ -20,7 +39,7 @@ const shuffleArray = (array) => {
   return newArray;
 };
 
-// --- KOMPONEN StatusUjianBox (TIDAK BERUBAH DARI VERSI SEBELUMNYA) ---
+// --- KOMPONEN StatusUjianBox (TIDAK BERUBAH) ---
 const StatusUjianBox = ({
   totalSoal,
   jumlahTerjawab,
@@ -117,9 +136,76 @@ const StatusUjianBox = ({
   );
 };
 
-// ================================================================
-// KOMPONEN UTAMA: PartSoal
-// ================================================================
+// --- KOMPONEN InfoPesertaBox (TIDAK BERUBAH) ---
+const InfoPesertaBox = ({ peserta }) => {
+  return (
+    <div className="bg-white rounded-xl border border-gray-200 p-5">
+      <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-4">
+        Data Peserta
+      </h3>
+      <ul className="space-y-3 text-sm">
+        <li className="flex items-center gap-3 text-gray-700">
+          <FaUser className="w-4 h-4 text-blue-500 flex-shrink-0" />
+          <span className="font-medium break-words min-w-0">
+            {peserta.nama}
+          </span>
+        </li>
+        <li className="flex items-center gap-3 text-gray-700">
+          <FaPhoneAlt className="w-4 h-4 text-blue-500 flex-shrink-0" />
+          <span className="font-medium">{peserta.nohp}</span>
+        </li>
+        <li className="flex items-center gap-3 text-gray-700">
+          <FaEnvelope className="w-4 h-4 text-blue-500 flex-shrink-0" />
+          <span className="font-medium break-words min-w-0">
+            {peserta.email}
+          </span>
+        </li>
+      </ul>
+    </div>
+  );
+};
+
+// --- KOMPONEN InfoUjianBox (TIDAK BERUBAH) ---
+const InfoUjianBox = ({
+  keterangan,
+  tanggal,
+  jamMulai,
+  jamBerakhir,
+  durasi,
+  formatTanggal,
+}) => {
+  return (
+    <div className="bg-white rounded-xl border border-gray-200 p-5">
+      <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-4">
+        Informasi Ujian
+      </h3>
+      <ul className="space-y-3 text-sm">
+        <li className="flex items-start gap-3 text-gray-700">
+          <FaInfoCircle className="w-4 h-4 text-blue-500 flex-shrink-0 mt-0.5" />
+          <span className="font-medium break-words min-w-0">
+            {keterangan}
+          </span>
+        </li>
+        <li className="flex items-center gap-3 text-gray-700">
+          <FaCalendarAlt className="w-4 h-4 text-blue-500 flex-shrink-0" />
+          <span className="font-medium">{formatTanggal(tanggal)}</span>
+        </li>
+        <li className="flex items-center gap-3 text-gray-700">
+          <FaClock className="w-4 h-4 text-blue-500 flex-shrink-0" />
+          <span className="font-medium">
+            {jamMulai} – {jamBerakhir} (WIB)
+          </span>
+        </li>
+        <li className="flex items-center gap-3 text-gray-700">
+          <FaRegClock className="w-4 h-4 text-blue-500 flex-shrink-0" />
+          <span className="font-medium">Durasi: {durasi} menit</span>
+        </li>
+      </ul>
+    </div>
+  );
+};
+
+// --- KOMPONEN UTAMA: PartSoal ---
 const PartSoal = () => {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -128,19 +214,37 @@ const PartSoal = () => {
   const [loading, setLoading] = useState(true);
   const [errMsg, setErrMsg] = useState("");
   const [keterangan, setKeterangan] = useState("");
-  const [tanggal, setTanggal] = useState("");
-  const [jamMulai, setJamMulai] = useState("");
-  const [jamBerakhir, setJamBerakhir] = useState("");
   const [durasiMenit, setDurasiMenit] = useState(0);
+  const [windowStartMs, setWindowStartMs] = useState(null);
+  const [windowEndMs, setWindowEndMs] = useState(null);
+  const [displayTanggal, setDisplayTanggal] = useState("");
+  const [displayJamMulai, setDisplayJamMulai] = useState("");
+  const [displayJamBerakhir, setDisplayJamBerakhir] = useState("");
   const [soalList, setSoalList] = useState([]);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [jawabanUser, setJawabanUser] = useState({});
   const [raguRagu, setRaguRagu] = useState({});
   const [sisaDetik, setSisaDetik] = useState(null);
-  const [startMs, setStartMs] = useState(null);
-  const [endMs, setEndMs] = useState(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [pesertaInfo, setPesertaInfo] = useState({
+    nama: "Memuat...",
+    nohp: "Memuat...",
+    email: "Memuat...",
+  });
+  const [showConfirmModal, setShowConfirmModal] = useState(false);
+  const [showAutoSubmitModal, setShowAutoSubmitModal] = useState(false);
+  const [autoSubmitCountdown, setAutoSubmitCountdown] = useState(10);
+  const countdownIntervalRef = useRef(null);
 
-  // Helper (Tidak berubah)
+  useEffect(() => {
+    return () => {
+      if (countdownIntervalRef.current) {
+        clearInterval(countdownIntervalRef.current);
+      }
+    };
+  }, []);
+
+  // --- Helper (Tidak Berubah) ---
   const pad2 = (n) => String(n).padStart(2, "0");
   const toLocalDateOnly = (val) => {
     const d = new Date(val);
@@ -156,108 +260,104 @@ const PartSoal = () => {
     if (!y || !m || !d) return raw;
     return `${d}/${m}/${y}`;
   };
+  const padTime = (t) => (t?.length === 5 ? `${t}:00` : t || "00:00:00");
 
-  // Helper Kunci localStorage (Progress Jawaban)
-  const getProgressKey = () => {
+  const getProgressKey = useCallback(() => {
     const peserta = JSON.parse(localStorage.getItem("pesertaData"));
-    const pesertaId = peserta?.id || "anon";
+    const pesertaId = peserta?.id;
+    if (!pesertaId) {
+      throw new Error("getProgressKey: ID Peserta tidak ditemukan di localStorage.");
+    }
     return `progress_${pesertaId}_${id}`;
-  };
+  }, [id]);
 
-  // --- [PERUBAHAN 1] ---
-  // Helper Kunci localStorage BARU (Urutan Soal)
-  const getOrderKey = () => {
+  const getOrderKey = useCallback(() => {
     const peserta = JSON.parse(localStorage.getItem("pesertaData"));
-    const pesertaId = peserta?.id || "anon";
-    return `order_${pesertaId}_${id}`;
-  };
 
-  // ===== FETCH DETAIL UJIAN =====
+    const pesertaId = peserta?.id;
+    if (!pesertaId) {
+      throw new Error("getOrderKey: ID Peserta tidak ditemukan di localStorage.");
+    }
+
+    return `order_${pesertaId}_${id}`;
+  }, [id]);
+
+  // =======================================================
+  // ▼▼▼ FETCH DETAIL UJIAN (DIPERBARUI) ▼▼▼
+  // =======================================================
   useEffect(() => {
     const fetchDetail = async () => {
       try {
         setLoading(true);
-        const res = await fetch(`${API_URL}/api/ujian/${id}`);
+
+        // ▼▼▼ PERUBAHAN DI SINI ▼▼▼
+        // Panggil rute publik, bukan rute admin
+        const res = await fetch(`${API_URL}/api/ujian/public/${id}`);
+        // ▲▲▲ AKHIR PERUBAHAN ▲▲▲
+
         const data = await res.json();
         if (!res.ok) throw new Error(data.message || "Gagal memuat ujian.");
 
+        // 1. Set Info Tampilan
         setKeterangan(data.keterangan || "");
-        setTanggal(data.tanggal || "");
-        setJamMulai(data.jam_mulai || "");
-        setJamBerakhir(data.jam_berakhir || "");
+        setDisplayTanggal(data.tanggal || "");
+        setDisplayJamMulai(data.jam_mulai || "");
+        setDisplayJamBerakhir(data.jam_berakhir || "");
 
-        // Perhitungan Waktu (Tidak berubah)
-        const jm = data.jam_mulai || "";
-        const jb = data.jam_berakhir || "";
-        const padTime = (t) => (t?.length === 5 ? `${t}:00` : t || "00:00:00");
-        const dateOnly = toLocalDateOnly(data.tanggal);
-        if (dateOnly && jm && jb) {
-          let start = new Date(`${dateOnly}T${padTime(jm)}`);
-          let end = new Date(`${dateOnly}T${padTime(jb)}`);
-          if (end <= start) {
-            end = new Date(end.getTime() + 24 * 60 * 60 * 1000);
-          }
-          const durasi = Math.max(0, Math.floor((end - start) / 1000));
-          setDurasiMenit(Math.floor(durasi / 60));
-          const now = Date.now();
-          let sisa = 0;
-          if (now < start.getTime()) {
-            sisa = durasi;
-          } else if (now >= start.getTime() && now <= end.getTime()) {
-            sisa = Math.max(0, Math.floor((end.getTime() - now) / 1000));
-          } else {
-            sisa = 0;
-          }
-          setStartMs(start.getTime());
-          setEndMs(end.getTime());
-          setSisaDetik(sisa);
-        } else {
-          setStartMs(null);
-          setEndMs(null);
-          setSisaDetik(null);
-          setDurasiMenit(0);
+        // 2. Set DURASI Pengerjaan
+        const durasiDariDb = parseInt(data.durasi, 10) || 0;
+        if (durasiDariDb <= 0) {
+          throw new Error("Durasi ujian tidak valid (0 menit).");
         }
+        setDurasiMenit(durasiDariDb);
 
-        // --- [PERUBAHAN 2: LOGIKA INTI PENGURUTAN SOAL] ---
-        
+        // 3. Set JENDELA WAKTU
+        const tglMulai = toLocalDateOnly(data.tanggal);
+        const tglBerakhir = toLocalDateOnly(data.tanggal_berakhir);
+        const jm = padTime(data.jam_mulai);
+        const jb = padTime(data.jam_berakhir);
+        if (!tglMulai || !tglBerakhir || !jm || !jb) {
+          throw new Error("Jadwal ujian (tanggal/jam) tidak lengkap.");
+        }
+        const startWindow = new Date(`${tglMulai}T${jm}`).getTime();
+        const endWindow = new Date(`${tglBerakhir}T${jb}`).getTime();
+        if (endWindow <= startWindow) {
+          throw new Error(
+            "Jadwal ujian tidak valid (waktu berakhir < waktu mulai)."
+          );
+        }
+        setWindowStartMs(startWindow);
+        setWindowEndMs(endWindow);
+
+        // 4. Logika Urutan Soal
         let soalListDariApi = data.soalList || [];
-        let soalListTerurut; // Ini akan menjadi list final
-
+        let soalListTerurut;
         const orderKey = getOrderKey();
         const savedOrderJson = localStorage.getItem(orderKey);
+        const isAcak = data.acak_soal === 1 || data.acak_soal === "1" || data.acak_soal === true;
 
         if (savedOrderJson) {
-          // --- A. JIKA URUTAN TERSIMPAN ADA (Refresh) ---
           console.log("Memuat urutan soal dari localStorage...");
           const savedSoalIds = JSON.parse(savedOrderJson);
-          
-          // Buat Peta (Map) dari soal API agar mudah dicari
-          const soalMap = new Map(soalListDariApi.map(s => [s.id, s]));
-          
-          // Susun ulang 'soalListTerurut' berdasarkan urutan ID yang tersimpan
-          soalListTerurut = savedSoalIds.map(id => soalMap.get(id)).filter(Boolean);
-
-        } else if (data.acak_soal === true) {
-          // --- B. JIKA TIDAK ADA URUTAN TERSIMPAN & MINTA ACAK (Load Pertama) ---
+          const soalMap = new Map(soalListDariApi.map((s) => [s.id, s]));
+          soalListTerurut = savedSoalIds
+            .map((id) => soalMap.get(id))
+            .filter(Boolean);
+        } else if (isAcak) {
+          // Masuk ke sini jika acak_soal aktif
           console.log("Mengacak soal dan menyimpan urutan...");
           const shuffledList = shuffleArray(soalListDariApi);
-          
-          // Simpan urutan ID yang BARU di-shuffle
-          const shuffledIds = shuffledList.map(s => s.id);
-          localStorage.setItem(orderKey, JSON.stringify(shuffledIds));
-          
-          // Gunakan list yang baru di-shuffle
-          soalListTerurut = shuffledList;
+          const shuffledIds = shuffledList.map((s) => s.id);
 
+          // Simpan urutan acak agar konsisten jika di-refresh
+          localStorage.setItem(orderKey, JSON.stringify(shuffledIds));
+          soalListTerurut = shuffledList;
         } else {
-          // --- C. JIKA TIDAK ADA URUTAN & TIDAK MINTA ACAK ---
           console.log("Memuat soal tanpa acak...");
           soalListTerurut = soalListDariApi;
         }
-        // --- [AKHIR PERUBAHAN 2] ---
 
-
-        // Mapping Soal (Gunakan 'soalListTerurut' hasil logika di atas)
+        // 5. Mapping Soal (Gambar URL diperbarui)
         const mapped = soalListTerurut.map((s) => {
           let pilihanNormalized = [];
           if (Array.isArray(s.pilihan)) {
@@ -274,19 +374,23 @@ const PartSoal = () => {
             }
           }
           return {
-            id: s.id, // ID Soal (question_id)
+            id: s.id,
             tipeSoal: s.tipeSoal || "pilihanGanda",
             soalText: s.soalText || "",
-            gambarUrl: s.gambar ? `${API_URL}/api/ujian${s.gambar}` : null,
+            // ▼▼▼ PERUBAHAN URL GAMBAR ▼▼▼
+            // (Menggunakan path relatif dari index.js, bukan dari /api/ujian)
+            gambarUrl: s.gambar ? `${API_URL}${s.gambar}` : null,
+            // ▲▲▲ AKHIR PERUBAHAN ▲▲▲
             pilihan: pilihanNormalized,
           };
         });
 
-        setSoalList(mapped); // Set state dengan list yang urutannya sudah benar
+        setSoalList(mapped);
 
-        // Inisialisasi state jawaban (Logika ini sudah benar dari vesi sebelumnya)
+        // 6. Inisialisasi State Jawaban
         const progressKey = getProgressKey();
-        const savedProgress = JSON.parse(localStorage.getItem(progressKey)) || {};
+        const savedProgress =
+          JSON.parse(localStorage.getItem(progressKey)) || {};
         const initJawab = {};
         const initRagu = {};
         mapped.forEach((soal) => {
@@ -297,6 +401,50 @@ const PartSoal = () => {
         setJawabanUser(initJawab);
         setRaguRagu(initRagu);
 
+        // 7. Inisialisasi TIMER BARU
+        const nowMs = Date.now();
+        if (nowMs < startWindow) {
+          throw new Error("Ujian belum dimulai.");
+        }
+        if (nowMs > endWindow) {
+          throw new Error("Jendela waktu untuk memulai ujian sudah ditutup.");
+        }
+        let startTimeMs = savedProgress.startTimeMs;
+        if (!startTimeMs) {
+          console.log("Memulai timer ujian...");
+          startTimeMs = nowMs;
+          savedProgress.startTimeMs = startTimeMs;
+          localStorage.setItem(progressKey, JSON.stringify(savedProgress));
+        }
+        const durationEndMs = startTimeMs + durasiDariDb * 60 * 1000;
+        const actualEndMs = durationEndMs;
+        if (nowMs > actualEndMs) {
+          setSisaDetik(0);
+        } else {
+          const sisa = Math.max(0, Math.floor((actualEndMs - nowMs) / 1000));
+          setSisaDetik(sisa);
+        }
+
+        // 8. Muat Data Peserta
+        try {
+          const dataPeserta = JSON.parse(localStorage.getItem("pesertaData"));
+          if (dataPeserta && dataPeserta.nama) {
+            setPesertaInfo({
+              nama: dataPeserta.nama,
+              nohp: dataPeserta.nohp,
+              email: dataPeserta.email,
+            });
+          } else {
+            throw new Error("Data peserta tidak ditemukan di localStorage.");
+          }
+        } catch (e) {
+          console.warn("Gagal memuat data peserta:", e.message);
+          setPesertaInfo({
+            nama: "Data Error",
+            nohp: "-",
+            email: "-",
+          });
+        }
       } catch (err) {
         console.error(err);
         setErrMsg(err.message);
@@ -306,29 +454,26 @@ const PartSoal = () => {
     };
 
     fetchDetail();
-  }, [id]);
+  }, [id, getOrderKey, getProgressKey]);
 
-  // ===== TIMER COUNTDOWN (Tidak berubah) =====
+  // --- TIMER COUNTDOWN (Tidak Berubah) ---
   useEffect(() => {
-    if (startMs == null || endMs == null) return;
-    const tick = () => {
-      const now = Date.now();
-      let next = 0;
-      if (now < startMs) {
-        next = Math.max(0, Math.floor((endMs - startMs) / 1000));
-      } else if (now >= startMs && now <= endMs) {
-        next = Math.max(0, Math.floor((endMs - now) / 1000));
-      } else {
-        next = 0;
-      }
-      setSisaDetik(next);
-    };
-    tick();
-    const t = setInterval(tick, 1000);
+    if (sisaDetik === null) return;
+    if (sisaDetik === 0) {
+      return;
+    }
+    const t = setInterval(() => {
+      setSisaDetik((prev) => {
+        if (prev <= 1) {
+          clearInterval(t);
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
     return () => clearInterval(t);
-  }, [startMs, endMs]);
+  }, [sisaDetik]);
 
-  // Format waktu (Tidak berubah)
   const timerDisplay = useMemo(() => {
     if (sisaDetik === null) return "--:--";
     const h = Math.floor(sisaDetik / 3600);
@@ -339,11 +484,14 @@ const PartSoal = () => {
       : `${pad2(m)}:${pad2(s)}`;
   }, [sisaDetik]);
 
-  // ===== Auto-save progress jawaban (Tidak berubah) =====
+  // --- Auto-save progress (Tidak Berubah) ---
   useEffect(() => {
-    if (loading || soalList.length === 0) return;
+    if (loading || soalList.length === 0 || sisaDetik === null) return;
     const progressKey = getProgressKey();
+    const savedProgress =
+      JSON.parse(localStorage.getItem(progressKey)) || {};
     const progressData = {
+      ...savedProgress,
       jawabanUser,
       raguRagu,
       lastUpdated: new Date().toISOString(),
@@ -353,27 +501,31 @@ const PartSoal = () => {
     } catch (e) {
       console.warn("Gagal menyimpan progress ke localStorage:", e);
     }
-  }, [jawabanUser, raguRagu, id, loading, soalList.length]);
+  }, [
+    jawabanUser,
+    raguRagu,
+    loading,
+    soalList.length,
+    getProgressKey,
+    sisaDetik,
+  ]);
 
-  // ===== HANDLER (Tidak berubah dari versi sebelumnya) =====
+  // --- HANDLER (Tidak berubah) ---
   const handleJawabPilihan = (pilihanId) => {
     const soalId = soalList[currentIndex]?.id;
     if (!soalId) return;
     setJawabanUser((prev) => ({ ...prev, [soalId]: pilihanId }));
   };
-
   const handleJawabEsai = (text) => {
     const soalId = soalList[currentIndex]?.id;
     if (!soalId) return;
     setJawabanUser((prev) => ({ ...prev, [soalId]: text }));
   };
-
   const toggleRagu = () => {
     const soalId = soalList[currentIndex]?.id;
     if (!soalId) return;
     setRaguRagu((prev) => ({ ...prev, [soalId]: !prev[soalId] }));
   };
-
   const gotoPrev = () => {
     setCurrentIndex((idx) => (idx > 0 ? idx - 1 : idx));
   };
@@ -382,72 +534,109 @@ const PartSoal = () => {
   };
   const gotoNomor = (idx) => setCurrentIndex(idx);
 
-  // ===== Submit jawaban =====
-  const handleSubmit = async () => {
-    const peserta = JSON.parse(localStorage.getItem("pesertaData"));
-    if (!peserta || !peserta.id) {
-      alert("Data peserta tidak ditemukan...");
-      navigate("/peserta");
+  // --- handleSubmit (Tidak Berubah) ---
+  // (Memanggil /api/hasil, yang sudah publik)
+  const handleSubmit = useCallback(
+    async (isAutoSubmit = false) => {
+      if (isSubmitting) return;
+
+      const peserta = JSON.parse(localStorage.getItem("pesertaData"));
+      if (!peserta || !peserta.id) {
+        alert("Data peserta tidak ditemukan...");
+        navigate("/");
+        return;
+      }
+
+      setIsSubmitting(true);
+
+      const jawabanArray = soalList.map((soal) => {
+        const jawaban = jawabanUser[soal.id] || null;
+        return {
+          question_id: soal.id,
+          tipe_soal: soal.tipeSoal,
+          jawaban_text: jawaban,
+        };
+      });
+      const payload = {
+        peserta_id: peserta.id,
+        exam_id: id,
+        jawaban: jawabanArray,
+      };
+
+      // ▼▼▼ HANYA ADA SATU BLOK try...catch ▼▼▼
+      try {
+        const res = await fetch(`${API_URL}/api/hasil`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.message);
+
+        localStorage.setItem("newHasilUjian", "true");
+
+        // 💡 PERBAIKAN: Ambil Key-nya DULU
+        const progressKey = getProgressKey();
+        const orderKey = getOrderKey();
+
+        // 💡 SEKARANG baru hapus semua datanya
+        localStorage.removeItem("pesertaData");
+        localStorage.removeItem("loginPeserta");
+        localStorage.removeItem(progressKey);
+        localStorage.removeItem(orderKey);
+
+        if (isAutoSubmit) {
+          setIsSubmitting(false);
+          countdownIntervalRef.current = setInterval(() => {
+            setAutoSubmitCountdown((prev) => {
+              if (prev <= 1) {
+                clearInterval(countdownIntervalRef.current);
+                navigate("/selesai");
+                return 0;
+              }
+              return prev - 1;
+            });
+          }, 1000);
+        } else {
+          setShowConfirmModal(false);
+          navigate("/selesai");
+        }
+      } catch (err) {
+        alert("Gagal menyimpan hasil ujian: " + err.message);
+        setIsSubmitting(false);
+        setShowConfirmModal(false);
+        setShowAutoSubmitModal(false);
+      }
+    },
+    [
+      isSubmitting,
+      id,
+      soalList,
+      jawabanUser,
+      navigate,
+      getProgressKey,
+      getOrderKey,
+    ]
+  );
+
+  // --- useEffect AUTO-SUBMIT (Tidak berubah) ---
+  useEffect(() => {
+    if (loading || sisaDetik === null || isSubmitting) {
       return;
     }
-    const konfirmasi = window.confirm(
-      "Apakah Anda yakin ingin mengumpulkan jawaban?"
-    );
-    if (!konfirmasi) return;
-
-    // Persiapan payload (Tidak berubah dari versi sebelumnya)
-    const jawabanArray = soalList.map((soal) => {
-      const jawaban = jawabanUser[soal.id] || null;
-      return {
-        question_id: soal.id,
-        tipe_soal: soal.tipeSoal,
-        jawaban_text: jawaban,
-      };
-    });
-    const payload = {
-      peserta_id: peserta.id,
-      exam_id: id,
-      jawaban: jawabanArray,
-    };
-
-    try {
-      const res = await fetch(`${API_URL}/api/hasil`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.message);
-
-      alert("✅ Jawaban berhasil dikumpulkan!");
-
-      // --- [PERUBAHAN BARU: SET NOTIFIKASI UNTUK ADMIN] ---
-      // Menandai di localStorage bahwa ada hasil ujian baru
-      localStorage.setItem("newHasilUjian", "true");
-      // --- [AKHIR PERUBAHAN BARU] ---
-
-
-      // --- [PEMBERSIHAN LOCALSTORAGE PESERTA] ---
-      // Hapus data 'pesertaData'
-      localStorage.removeItem("pesertaData");
-      // Hapus data 'progress' jawaban
-      const progressKey = getProgressKey();
-      localStorage.removeItem(progressKey);
-      // Hapus data 'urutan' soal
-      const orderKey = getOrderKey();
-      localStorage.removeItem(orderKey);
-      // --- [AKHIR PEMBERSIHAN] ---
-
-      navigate("/peserta");
-    } catch (err) {
-      alert("Gagal menyimpan hasil ujian: " + err.message);
+    if (sisaDetik === 0) {
+      if (countdownIntervalRef.current === null && !showAutoSubmitModal) {
+        console.log("WAKTU HABIS: Auto-submit dipicu.");
+        setShowAutoSubmitModal(true);
+        handleSubmit(true);
+      }
     }
-  };
+  }, [sisaDetik, isSubmitting, loading, handleSubmit, showAutoSubmitModal]);
 
-  // ===== UI STATE (Tidak berubah) =====
+  // --- RENDER --- (Tidak berubah)
   if (loading)
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 to-blue-100 text-blue-700">
+      <div className="flex-1 flex items-center justify-center bg-gradient-to-br from-blue-50 to-blue-100 text-blue-700">
         <div className="text-center">
           <div className="animate-spin rounded-full h-10 w-10 border-4 border-blue-400 border-t-transparent mx-auto mb-4" />
           <p className="text-sm font-medium tracking-wide">Memuat ujian...</p>
@@ -457,9 +646,15 @@ const PartSoal = () => {
 
   if (errMsg)
     return (
-      <div className="min-h-screen flex flex-col items-center justify-center bg-red-50 text-red-600 p-6">
+      <div className="flex-1 flex flex-col items-center justify-center bg-red-50 text-red-600 p-6">
         <p className="text-lg font-semibold mb-2">Gagal memuat ujian</p>
         <p className="text-sm text-red-500">{errMsg}</p>
+        <button
+          onClick={() => navigate("/")}
+          className="mt-4 px-4 py-2 bg-red-600 text-white rounded-md"
+        >
+          Kembali ke Halaman Utama
+        </button>
       </div>
     );
 
@@ -468,39 +663,9 @@ const PartSoal = () => {
     (v) => v !== ""
   ).length;
 
-  // ================================================================
-  // RENDER (Tidak berubah dari versi sebelumnya)
-  // ================================================================
   return (
-    <div className="min-h-screen bg-gray-50 flex flex-col relative">
-      {/* NAVBAR */}
-      <header className="relative z-30 bg-white border-b border-gray-200">
-        <div className="max-w-7xl mx-auto px-4 py-3 flex items-start justify-between">
-          <div className="flex items-start gap-3 min-w-0 flex-1">
-            <div className="hidden sm:flex items-center justify-center w-10 h-10 rounded-md bg-blue-600 text-white text-[11px] font-semibold shrink-0">
-              UJIAN
-            </div>
-            <div className="flex flex-col min-w-0">
-              <div className="text-sm font-semibold text-gray-800 break-words leading-snug">
-                {keterangan || "Ujian"}
-              </div>
-              <div className="text-[11px] text-gray-500 leading-snug flex gap-2 items-center">
-                <span>{formatTanggal(tanggal)}</span>
-                <span>•</span>
-                <span className="flex items-center gap-1">
-                  <FaClock className="inline-block" />
-                  {jamMulai || "--:--"}–{jamBerakhir || "--:--"}
-                </span>
-                <span>•</span>
-                <span>Durasi {durasiMenit} menit</span>
-              </div>
-            </div>
-          </div>
-        </div>
-      </header>
-
-      {/* KONTEN SOAL DAN NAVIGASI */}
-      <div className="flex-1 max-w-7xl w-full mx-auto px-4 py-6">
+    <>
+      <div className="flex-1 max-w-7xl w-full mx-auto px-4 py-6 bg-gray-50">
         <div className="flex flex-col lg:flex-row gap-6 items-start">
           {/* Kolom Kiri: Soal */}
           <main className="flex-1 w-full">
@@ -513,35 +678,46 @@ const PartSoal = () => {
                   <div className="text-sm font-semibold text-gray-800">
                     {soalAktif?.tipeSoal === "pilihanGanda"
                       ? "Pilihan Ganda"
-                      : "Esai / Uraian"}
+                      : soalAktif?.tipeSoal === "teksSingkat"
+                        ? "Jawaban Singkat"
+                        : "Esai / Uraian"}
                   </div>
                 </div>
-
                 <div className="flex flex-col gap-2 sm:items-end">
                   <div className="flex items-center gap-2 text-[12px]">
                     <button
                       onClick={gotoPrev}
                       disabled={currentIndex === 0}
-                      className="px-3 py-1.5 rounded-md border text-gray-700 text-[12px] bg-white hover:bg-gray-50 border-gray-300 disabled:opacity-40 disabled:cursor-not-allowed"
+                      className="
+    px-3 py-1.5 rounded-md border text-[12px]
+    bg-blue-600 text-white border-blue-600
+    hover:bg-blue-700 hover:border-blue-700
+    disabled:opacity-40 disabled:cursor-not-allowed
+  "
                     >
-                      Prev
+                      Kembali
                     </button>
+
                     <button
                       onClick={gotoNext}
                       disabled={currentIndex === soalList.length - 1}
-                      className="px-3 py-1.5 rounded-md border text-gray-700 text-[12px] bg-white hover:bg-gray-50 border-gray-300 disabled:opacity-40 disabled:cursor-not-allowed"
+                      className="
+    px-3 py-1.5 rounded-md border text-[12px]
+    bg-green-600 text-white border-green-600
+    hover:bg-green-700 hover:border-green-700
+    disabled:opacity-40 disabled:cursor-not-allowed
+  "
                     >
-                      Next
+                      Lanjut
                     </button>
                   </div>
-                  
+
                   <button
                     onClick={toggleRagu}
-                    className={`text-[12px] px-3 py-1.5 rounded-md border ${
-                      raguRagu[soalAktif?.id]
-                        ? "bg-yellow-50 border-yellow-400 text-yellow-700"
-                        : "bg-white border-gray-300 text-gray-600 hover:bg-gray-50"
-                    }`}
+                    className={`text-[12px] px-3 py-1.5 rounded-md border ${raguRagu[soalAktif?.id]
+                      ? "bg-yellow-50 border-yellow-400 text-yellow-700"
+                      : "bg-white border-orange-300 text-gray-600 hover:bg-gray-50"
+                      }`}
                   >
                     {raguRagu[soalAktif?.id]
                       ? "Ditandai ragu-ragu"
@@ -579,30 +755,25 @@ const PartSoal = () => {
                         <button
                           key={pil.id}
                           onClick={() => handleJawabPilihan(pil.id)}
-                          className={`w-full text-left flex items-start gap-3 rounded-lg border p-4 text-[15px] leading-relaxed transition ${
-                            aktif
-                              ? "bg-white border-blue-500 ring-2 ring-blue-200"
-                              : "bg-white border-gray-300 hover:bg-gray-50 hover:border-blue-300"
-                          }`}
+                          className={`w-full text-left flex items-start gap-3 rounded-lg border p-4 text-[15px] leading-relaxed transition ${aktif
+                            ? "bg-white border-blue-500 ring-2 ring-blue-200"
+                            : "bg-white border-gray-300 hover:bg-gray-50 hover:border-blue-300"
+                            }`}
                         >
                           <div
-                            className={`flex-shrink-0 w-8 h-8 rounded-md flex items-center justify-center text-sm font-semibold ${
-                              aktif
-                                ? "bg-blue-600 text-white"
-                                : "bg-gray-100 text-gray-700 border border-gray-300"
-                            }`}
+                            className={`flex-shrink-0 w-8 h-8 rounded-md flex items-center justify-center text-sm font-semibold ${aktif
+                              ? "bg-blue-600 text-white"
+                              : "bg-gray-100 text-gray-700 border border-gray-300"
+                              }`}
                           >
                             {labelHuruf}
                           </div>
-
                           <div className="flex-1 text-gray-800 break-words text-left">
                             {pil.text || "(kosong)"}
                           </div>
-
                           <div
-                            className={`text-lg ${
-                              aktif ? "text-blue-600" : "text-gray-400"
-                            }`}
+                            className={`text-lg ${aktif ? "text-blue-600" : "text-gray-400"
+                              }`}
                           >
                             {aktif ? <FaCheckCircle /> : <FaRegCircle />}
                           </div>
@@ -612,27 +783,31 @@ const PartSoal = () => {
                   </div>
                 )}
 
-                {/* Esai */}
-                {soalAktif?.tipeSoal === "esay" && (
-                  <div className="mt-6">
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Jawaban Anda
-                    </label>
-                    <textarea
-                      className="w-full min-h-[160px] bg-white border border-gray-300 rounded-lg p-4 text-gray-800 text-[15px] leading-relaxed focus:outline-none focus:ring-2 focus:ring-blue-400/40 focus:border-blue-400"
-                      value={jawabanUser[soalAktif.id] || ""}
-                      onChange={(e) => handleJawabEsai(e.target.value)}
-                      placeholder="Ketik jawaban Anda di sini..."
-                    />
-                  </div>
-                )}
+                {/* Esai atau Teks Singkat */}
+                {(soalAktif?.tipeSoal === "esay" ||
+                  soalAktif?.tipeSoal === "teksSingkat") && (
+                    <div className="mt-6">
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        Jawaban Anda
+                      </label>
+                      <textarea
+                        className="w-full min-h-[160px] bg-white border border-gray-300 rounded-lg p-4 text-gray-800 text-[15px] leading-relaxed focus:outline-none focus:ring-2 focus:ring-blue-400/40 focus:border-blue-400"
+                        value={jawabanUser[soalAktif.id] || ""}
+                        onChange={(e) => handleJawabEsai(e.target.value)}
+                        placeholder="Ketik jawaban Anda di sini..."
+                      />
+                      {soalAktif?.tipeSoal === "teksSingkat" && (
+                        <p className="text-xs text-gray-500 mt-1"></p>
+                      )}
+                    </div>
+                  )}
               </div>
-
             </div>
           </main>
 
           {/* Kolom Kanan: Status Ujian */}
-          <aside className="w-full lg:w-72 xl:w-80">
+          <aside className="w-full lg:w-72 xl:w-80 space-y-6">
+            <InfoPesertaBox peserta={pesertaInfo} />
             <StatusUjianBox
               totalSoal={soalList.length}
               jumlahTerjawab={jumlahTerjawab}
@@ -642,19 +817,37 @@ const PartSoal = () => {
               raguRagu={raguRagu}
               currentIndex={currentIndex}
               onNavClick={gotoNomor}
-              onSubmit={handleSubmit}
+              onSubmit={() => setShowConfirmModal(true)}
+            />
+            <InfoUjianBox
+              keterangan={keterangan}
+              tanggal={displayTanggal}
+              jamMulai={displayJamMulai}
+              jamBerakhir={displayJamBerakhir}
+              durasi={durasiMenit}
+              formatTanggal={formatTanggal}
             />
           </aside>
         </div>
       </div>
 
-      {/* FOOTER */}
-      <footer className="w-full mt-8 border-t border-gray-200 bg-white py-3">
-        <div className="max-w-7xl mx-auto text-center text-[12px] text-gray-500">
-          © {new Date().getFullYear()} BPS Kota Salatiga. All rights reserved.
-        </div>
-      </footer>
-    </div>
+      {/* RENDER MODAL */}
+      {showConfirmModal && (
+        <SubmitUjianModal
+          mode="confirm"
+          isSubmitting={isSubmitting}
+          onConfirm={() => handleSubmit(false)}
+          onCancel={() => setShowConfirmModal(false)}
+        />
+      )}
+      {showAutoSubmitModal && (
+        <SubmitUjianModal
+          mode="auto_submit"
+          isSubmitting={isSubmitting}
+          countdown={autoSubmitCountdown}
+        />
+      )}
+    </>
   );
 };
 

@@ -9,6 +9,7 @@ import {
   FaCogs,
   FaListAlt,
   FaImage,
+  FaCheckCircle, // <-- 1. TAMBAHKAN ICON INI
 } from "react-icons/fa";
 
 const API_URL = "http://localhost:5000";
@@ -20,22 +21,32 @@ const EditSoal = () => {
   const [loading, setLoading] = useState(true);
   const [keterangan, setKeterangan] = useState("");
   const [tanggal, setTanggal] = useState("");
+  const [tanggalBerakhir, setTanggalBerakhir] = useState("");
   const [jamMulai, setJamMulai] = useState("");
   const [jamBerakhir, setJamBerakhir] = useState("");
-  const [acakSoal, setAcakSoal] = useState(false); // <-- 1. STATE DITAMBAHKAN
+  const [durasi, setDurasi] = useState("");
+  const [acakSoal, setAcakSoal] = useState(false);
   const [daftarSoal, setDaftarSoal] = useState([]);
+  const [successMessage, setSuccessMessage] = useState(""); // <-- 2. TAMBAHKAN STATE INI
 
-  // === FETCH DATA UJIAN ===
+  // =======================================================
+  // ▼▼▼ FETCH DATA UJIAN (DIPERBARUI) ▼▼▼
+  // =======================================================
   useEffect(() => {
     const fetchDetail = async () => {
       try {
-        const res = await fetch(`${API_URL}/api/ujian/${id}`);
+        const token = sessionStorage.getItem("adminToken");
+        if (!token) throw new Error("Token tidak ditemukan.");
+
+        const res = await fetch(`${API_URL}/api/ujian/${id}`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
         const data = await res.json();
         if (!res.ok) throw new Error(data.message || "Gagal memuat data ujian");
 
         setKeterangan(data.keterangan || "");
 
-        // Pastikan tanggal jadi format yyyy-mm-dd (untuk input date)
+        // Set Tanggal Mulai
         const localDate = data.tanggal
           ? new Date(data.tanggal).toLocaleDateString("en-CA", {
               timeZone: "Asia/Jakarta",
@@ -43,29 +54,44 @@ const EditSoal = () => {
           : "";
         setTanggal(localDate);
 
-        // Ambil jam dari API (sesuai backend baru)
+        // Set Tanggal Berakhir
+        const localDateBerakhir = data.tanggal_berakhir
+          ? new Date(data.tanggal_berakhir).toLocaleDateString("en-CA", {
+              timeZone: "Asia/Jakarta",
+            })
+          : "";
+        setTanggalBerakhir(localDateBerakhir);
+
         setJamMulai(data.jam_mulai || "");
         setJamBerakhir(data.jam_berakhir || "");
-        setAcakSoal(data.acak_soal || false); // <-- 2. SET STATE DARI FETCH
+        setDurasi(data.durasi || "");
+        setAcakSoal(data.acak_soal || false);
 
+        // [PERBAIKAN] Simpan ID asli dari database
         setDaftarSoal(
-          (data.soalList || []).map((s, i) => ({
-            id: i + 1,
+          (data.soalList || []).map((s) => ({
+            id: s.id,
             tipeSoal: s.tipeSoal,
             soalText: s.soalText,
             gambar: s.gambar || null,
             gambarPreview: s.gambar ? `${API_URL}/api/ujian${s.gambar}` : null,
             pilihan:
               s.tipeSoal === "pilihanGanda"
-                ? (s.pilihan || []).map((p, idx) => ({
-                    id: idx + 1,
+                ? (s.pilihan || []).map((p) => ({
+                    id: p.id,
                     text: p.text,
                   }))
                 : [],
             kunciJawaban:
               s.tipeSoal === "pilihanGanda"
-                ? (s.pilihan || []).findIndex((p) => p.isCorrect) + 1
+                ? (s.pilihan || []).find((p) => p.isCorrect)?.id || 0
                 : 0,
+            // <-- PERUBAHAN DI SINI -->
+            kunciJawabanText:
+              s.tipeSoal === "teksSingkat"
+                ? (s.pilihan || []).find((p) => p.isCorrect)?.text || ""
+                : "",
+            // <-- AKHIR PERUBAHAN -->
           }))
         );
       } catch (err) {
@@ -76,8 +102,11 @@ const EditSoal = () => {
     };
     fetchDetail();
   }, [id]);
+  // =======================================================
+  // ▲▲▲ AKHIR FETCH DATA ▲▲▲
+  // =======================================================
 
-  // === HANDLER GAMBAR ===
+  // === HANDLER GAMBAR === (Tidak berubah)
   const handleFileChange = (soalId, file) => {
     const updated = daftarSoal.map((s) => {
       if (s.id === soalId) {
@@ -100,9 +129,12 @@ const EditSoal = () => {
     );
   };
 
-  // === HANDLER SOAL ===
+  // === HANDLER SOAL & PILIHAN ===
   const handleTambahSoal = () => {
-    const newId = daftarSoal.length + 1;
+    const newId = `new_soal_${Date.now()}`;
+    const newPilId1 = `new_pil_${Date.now()}_1`;
+    const newPilId2 = `new_pil_${Date.now()}_2`;
+
     setDaftarSoal([
       ...daftarSoal,
       {
@@ -112,10 +144,11 @@ const EditSoal = () => {
         gambar: null,
         gambarPreview: null,
         pilihan: [
-          { id: 1, text: "" },
-          { id: 2, text: "" },
+          { id: newPilId1, text: "" },
+          { id: newPilId2, text: "" },
         ],
-        kunciJawaban: 1,
+        kunciJawaban: newPilId1,
+        kunciJawabanText: "", // <-- PERUBAHAN DI SINI
       },
     ]);
   };
@@ -135,14 +168,16 @@ const EditSoal = () => {
     setDaftarSoal(updated);
   };
 
-  // === HANDLER PILIHAN ===
   const handleTambahPilihan = (soalId) => {
     setDaftarSoal((prev) =>
       prev.map((s) =>
         s.id === soalId
           ? {
               ...s,
-              pilihan: [...s.pilihan, { id: s.pilihan.length + 1, text: "" }],
+              pilihan: [
+                ...s.pilihan,
+                { id: `new_pil_${Date.now()}`, text: "" },
+              ],
             }
           : s
       )
@@ -193,26 +228,42 @@ const EditSoal = () => {
     );
   };
 
-  // === SIMPAN PERUBAHAN ===
+  // =======================================================
+  // ▼▼▼ SIMPAN PERUBAHAN (DIPERBARUI) ▼▼▼
+  // =======================================================
   const handleSubmit = async (e) => {
     e.preventDefault();
 
+    // Validasi
     if (!jamMulai || !jamBerakhir) {
       alert("Jam mulai dan jam berakhir wajib diisi.");
       return;
     }
+    if (!tanggalBerakhir) {
+      alert("Tanggal berakhir wajib diisi.");
+      return;
+    }
+    if (!durasi || parseInt(durasi, 10) <= 0) {
+      alert("Durasi pengerjaan wajib diisi dan harus lebih dari 0.");
+      return;
+    }
 
     const soalList = daftarSoal.map((s) => ({
+      id: s.id,
       tipeSoal: s.tipeSoal,
       soalText: s.soalText,
       gambar: s.gambarPreview?.includes("/uploads/")
         ? s.gambarPreview.replace(`${API_URL}/api/ujian`, "")
         : null,
-      pilihan: s.tipeSoal === "pilihanGanda" ? s.pilihan.map((p) => p.text) : [],
+      pilihan: s.tipeSoal === "pilihanGanda" ? s.pilihan : [],
+      // <-- PERUBAHAN DI SINI -->
       kunciJawabanText:
         s.tipeSoal === "pilihanGanda"
           ? s.pilihan.find((p) => p.id === s.kunciJawaban)?.text || ""
+          : s.tipeSoal === "teksSingkat"
+          ? s.kunciJawabanText || ""
           : "",
+      // <-- AKHIR PERUBAHAN -->
     }));
 
     const formData = new FormData();
@@ -221,9 +272,11 @@ const EditSoal = () => {
       JSON.stringify({
         keterangan,
         tanggal,
+        tanggalBerakhir,
         jamMulai,
         jamBerakhir,
-        acakSoal, // <-- 3. TAMBAHKAN KE SUBMIT
+        durasi,
+        acakSoal,
         soalList,
       })
     );
@@ -235,20 +288,37 @@ const EditSoal = () => {
     });
 
     try {
+      const token = sessionStorage.getItem("adminToken");
       const res = await fetch(`${API_URL}/api/ujian/${id}`, {
         method: "PUT",
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
         body: formData,
       });
 
       const json = await res.json();
       if (!res.ok) throw new Error(json.message || "Gagal menyimpan perubahan");
 
-      alert("✅ Ujian berhasil diperbarui!");
-      navigate("/admin/daftar-soal");
+      // ==================================================
+      // ▼▼▼ PERUBAHAN LOGIKA NOTIFIKASI ▼▼▼
+      // ==================================================
+      setSuccessMessage("Ujian berhasil diperbarui!");
+
+      // Tunggu 3 detik baru pindah halaman
+      setTimeout(() => {
+        navigate("/admin/daftar-soal");
+      }, 3000);
+      // ==================================================
+      // ▲▲▲ AKHIR PERUBAHAN ▲▲▲
+      // ==================================================
     } catch (err) {
       alert("Terjadi kesalahan: " + err.message);
     }
   };
+  // =======================================================
+  // ▲▲▲ AKHIR SIMPAN PERUBAHAN ▲▲▲
+  // =======================================================
 
   if (loading)
     return (
@@ -257,7 +327,7 @@ const EditSoal = () => {
       </p>
     );
 
-  // === STYLE ===
+  // === STYLE === (Tidak berubah)
   const labelClass =
     "block text-sm font-semibold text-gray-700 mb-1 tracking-wide";
   const inputClass =
@@ -267,12 +337,23 @@ const EditSoal = () => {
   const fieldsetClass =
     "bg-white rounded-xl border border-gray-100 shadow-sm p-6 transition duration-200";
 
+  // === RENDER === (DIPERBARUI)
   return (
     <div className="bg-gray-50 min-h-screen flex flex-col">
+      {/* 3. TAMBAHKAN BLOK TOAST DI SINI */}
+      {successMessage && (
+        <div className="fixed top-20 left-1/2 -translate-x-1/2 z-40">
+          <div className="flex items-center gap-3 bg-green-600 text-white px-5 py-3 rounded-lg shadow-lg">
+            <FaCheckCircle className="text-white w-5 h-5" />
+            <span className="font-semibold text-base">{successMessage}</span>
+          </div>
+        </div>
+      )}
+
       {/* HEADER */}
       <div className="bg-white shadow-md border-b border-gray-300 px-8 py-4 flex justify-between items-center sticky top-0 z-50">
         <h2 className="text-xl font-semibold text-gray-900 flex items-center gap-2">
-          🧩 Edit Soal Ujian
+          🧩 Edit Ujian
         </h2>
 
         <div className="flex gap-3">
@@ -317,8 +398,9 @@ const EditSoal = () => {
                 />
               </div>
 
+              {/* JENDELA AKSES (TANGGAL) */}
               <div className="relative">
-                <label className={labelClass}>Tanggal Pengerjaan</label>
+                <label className={labelClass}>Tanggal Mulai (Akses Dibuka)</label>
                 <div className="absolute inset-y-0 left-3 flex items-center pt-6 z-10">
                   <FaCalendarAlt className="text-gray-400" />
                 </div>
@@ -332,7 +414,24 @@ const EditSoal = () => {
               </div>
 
               <div className="relative">
-                <label className={labelClass}>Jam Mulai</label>
+                <label className={labelClass}>
+                  Tanggal Berakhir (Akses Ditutup)
+                </label>
+                <div className="absolute inset-y-0 left-3 flex items-center pt-6 z-10">
+                  <FaCalendarAlt className="text-gray-400" />
+                </div>
+                <input
+                  type="date"
+                  value={tanggalBerakhir}
+                  onChange={(e) => setTanggalBerakhir(e.target.value)}
+                  className={`${inputClass} pl-10`}
+                  required
+                />
+              </div>
+
+              {/* JENDELA AKSES (JAM) */}
+              <div className="relative">
+                <label className={labelClass}>Jam Mulai (Akses Dibuka)</label>
                 <div className="absolute inset-y-0 left-3 flex items-center pt-6 z-10">
                   <FaClock className="text-gray-400" />
                 </div>
@@ -346,7 +445,7 @@ const EditSoal = () => {
               </div>
 
               <div className="relative">
-                <label className={labelClass}>Jam Berakhir</label>
+                <label className={labelClass}>Jam Berakhir (Akses Ditutup)</label>
                 <div className="absolute inset-y-0 left-3 flex items-center pt-6 z-10">
                   <FaClock className="text-gray-400" />
                 </div>
@@ -358,9 +457,26 @@ const EditSoal = () => {
                   required
                 />
               </div>
+
+              {/* FIELD DURASI */}
+              <div className="md:col-span-2">
+                <label className={labelClass}>Durasi Pengerjaan (Menit)</label>
+                <input
+                  type="number"
+                  min="1"
+                  value={durasi}
+                  onChange={(e) => setDurasi(e.target.value)}
+                  className={inputClass}
+                  placeholder="Contoh: 90"
+                  required
+                />
+                <p className="text-xs text-gray-500 mt-1">
+                  Ini adalah waktu hitung mundur yang akan didapat peserta setelah
+                  menekan tombol "Mulai".
+                </p>
+              </div>
             </div>
 
-            {/* 4. JSX CHECKBOX DITAMBAHKAN */}
             <div className="mt-4">
               <label className="inline-flex items-center gap-2 text-sm text-gray-700">
                 <input
@@ -403,6 +519,7 @@ const EditSoal = () => {
                 <input
                   type="file"
                   accept="image/*"
+                  value=""
                   onChange={(e) => handleFileChange(soal.id, e.target.files[0])}
                   className="block text-sm border border-gray-300 rounded-md p-1 w-full"
                 />
@@ -428,6 +545,7 @@ const EditSoal = () => {
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div>
                   <label className={labelClass}>Tipe Soal</label>
+                  {/* <-- PERUBAHAN DI SINI --> */}
                   <select
                     value={soal.tipeSoal}
                     onChange={(e) =>
@@ -436,8 +554,10 @@ const EditSoal = () => {
                     className={inputClass}
                   >
                     <option value="pilihanGanda">Pilihan Ganda</option>
-                    <option value="esay">Esai</option>
+                    <option value="teksSingkat">Teks Singkat (Auto-Nilai)</option>
+                    <option value="esay">Esai (Nilai Manual)</option>
                   </select>
+                  {/* <-- AKHIR PERUBAHAN --> */}
                 </div>
 
                 <div className="md:col-span-2">
@@ -504,6 +624,37 @@ const EditSoal = () => {
                   </button>
                 </div>
               )}
+
+              {/* <-- PERUBAHAN DI SINI (BLOK BARU) --> */}
+              {/* Kunci Jawaban Teks Singkat */}
+              {soal.tipeSoal === "teksSingkat" && (
+                <div className="mt-5 border-t border-gray-200 pt-4">
+                  <h4 className="text-base font-semibold text-gray-800 mb-2">
+                    Kunci Jawaban
+                  </h4>
+                  <input
+                    type="text"
+                    placeholder="Masukkan jawaban singkat yang benar (case-insensitive)"
+                    value={soal.kunciJawabanText}
+                    onChange={(e) =>
+                      handleSoalChange(
+                        soal.id,
+                        "kunciJawabanText",
+                        e.target.value
+                      )
+                    }
+                    className={inputClass}
+                    required
+                  />
+                  <p className="text-xs text-gray-500 mt-1">
+                    Gunakan tanda <b>,</b> (tanda koma) untuk memisahkan jika
+                    ada lebih dari satu jawaban benar.
+                    <br />
+                    Contoh: <b>2 , dua , 2 (dua)</b>
+                  </p>
+                </div>
+              )}
+              {/* <-- AKHIR PERUBAHAN --> */}
             </fieldset>
           ))}
 

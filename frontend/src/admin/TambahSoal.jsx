@@ -11,12 +11,21 @@ import {
   FaImage,
 } from "react-icons/fa";
 
+const getAdminToken = () => {
+  const token = sessionStorage.getItem("adminToken");
+  if (!token) throw new Error("Token tidak ditemukan.");
+  return token;
+};
+
 const TambahSoal = () => {
   const [keterangan, setKeterangan] = useState("");
   const [tanggal, setTanggal] = useState("");
+  const [tanggalBerakhir, setTanggalBerakhir] = useState("");
   const [jamMulai, setJamMulai] = useState("");
   const [jamBerakhir, setJamBerakhir] = useState("");
-  const [acakSoal, setAcakSoal] = useState(false); // State untuk checkbox acak soal
+  const [durasi, setDurasi] = useState("");
+  const [acakSoal, setAcakSoal] = useState(false);
+  const [successMessage, setSuccessMessage] = useState("");
   const [daftarSoal, setDaftarSoal] = useState([
     {
       id: 1,
@@ -29,6 +38,7 @@ const TambahSoal = () => {
         { id: 2, text: "" },
       ],
       kunciJawaban: 1,
+      kunciJawabanText: "", // <-- PERUBAHAN DI SINI
     },
   ]);
 
@@ -63,6 +73,7 @@ const TambahSoal = () => {
           { id: 2, text: "" },
         ],
         kunciJawaban: 1,
+        kunciJawabanText: "", // <-- PERUBAHAN DI SINI
       },
     ]);
   };
@@ -88,9 +99,9 @@ const TambahSoal = () => {
       prev.map((s) =>
         s.id === soalId
           ? {
-              ...s,
-              pilihan: [...s.pilihan, { id: s.pilihan.length + 1, text: "" }],
-            }
+            ...s,
+            pilihan: [...s.pilihan, { id: s.pilihan.length + 1, text: "" }],
+          }
           : s
       )
     );
@@ -124,11 +135,11 @@ const TambahSoal = () => {
       prev.map((s) =>
         s.id === soalId
           ? {
-              ...s,
-              pilihan: s.pilihan.map((p) =>
-                p.id === pilihanId ? { ...p, text } : p
-              ),
-            }
+            ...s,
+            pilihan: s.pilihan.map((p) =>
+              p.id === pilihanId ? { ...p, text } : p
+            ),
+          }
           : s
       )
     );
@@ -144,9 +155,17 @@ const TambahSoal = () => {
   const handleSubmit = async (e) => {
     e.preventDefault();
 
-    // Validasi sederhana jam
+    // Validasi
     if (!jamMulai || !jamBerakhir) {
       alert("Jam mulai dan jam berakhir wajib diisi.");
+      return;
+    }
+    if (!tanggalBerakhir) {
+      alert("Tanggal berakhir wajib diisi.");
+      return;
+    }
+    if (!durasi || parseInt(durasi, 10) <= 0) {
+      alert("Durasi pengerjaan wajib diisi dan harus lebih dari 0.");
       return;
     }
 
@@ -154,10 +173,14 @@ const TambahSoal = () => {
       tipeSoal: s.tipeSoal,
       soalText: s.soalText,
       pilihan: s.tipeSoal === "pilihanGanda" ? s.pilihan.map((p) => p.text) : [],
+      // <-- PERUBAHAN DI SINI -->
       kunciJawabanText:
         s.tipeSoal === "pilihanGanda"
           ? s.pilihan.find((p) => p.id === s.kunciJawaban)?.text || ""
-          : "",
+          : s.tipeSoal === "teksSingkat"
+            ? s.kunciJawabanText || ""
+            : "",
+      // <-- AKHIR PERUBAHAN -->
     }));
 
     const formData = new FormData();
@@ -166,9 +189,11 @@ const TambahSoal = () => {
       JSON.stringify({
         keterangan,
         tanggal,
-        jamMulai,      // <-- diganti dari waktuMundur
-        jamBerakhir,   // <-- diganti dari waktuMundur
-        acakSoal,      // <--- Menambahkan flag acakSoal
+        tanggalBerakhir,
+        jamMulai,
+        jamBerakhir,
+        durasi,
+        acakSoal,
         soalList,
       })
     );
@@ -181,22 +206,32 @@ const TambahSoal = () => {
     });
 
     try {
+      const token = getAdminToken();
+      if (!token) throw new Error("Token tidak ditemukan.");
+
       const res = await fetch("http://localhost:5000/api/ujian", {
         method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
         body: formData,
       });
 
       const json = await res.json();
       if (!res.ok) throw new Error(json.message || "Gagal menyimpan ujian");
 
-      alert(`✅ Ujian tersimpan! ID: ${json.id}`);
+      // Tampilkan toast tanpa ID
+      setSuccessMessage("Ujian Berhasil Disimpan");
+      setTimeout(() => setSuccessMessage(""), 7000);
 
       // Reset form
       setKeterangan("");
       setTanggal("");
+      setTanggalBerakhir("");
       setJamMulai("");
       setJamBerakhir("");
-      setAcakSoal(false); // Reset checkbox
+      setDurasi("");
+      setAcakSoal(false);
       setDaftarSoal([
         {
           id: 1,
@@ -209,6 +244,7 @@ const TambahSoal = () => {
             { id: 2, text: "" },
           ],
           kunciJawaban: 1,
+          kunciJawabanText: "", // <-- PERUBAHAN DI SINI
         },
       ]);
     } catch (err) {
@@ -229,16 +265,40 @@ const TambahSoal = () => {
 
   return (
     <div className="bg-gray-50 min-h-screen">
+      {/* TOAST SUKSES */}
+      {successMessage && (
+        <div className="fixed top-20 left-1/2 -translate-x-1/2 z-40">
+          <div className="flex items-center gap-3 bg-green-600 text-white px-5 py-3 rounded-lg shadow-lg">
+            <FaCheckCircle className="text-white w-5 h-5" />
+            <span className="font-semibold text-base">{successMessage}</span>
+          </div>
+        </div>
+      )}
+
       {/* HEADER */}
-      <div className="bg-white shadow-sm border-b border-gray-300 px-8 py-5 sticky top-0 z-50">
+      <div className="bg-white shadow-sm border-b border-gray-300 px-8 py-4 flex justify-between items-center sticky top-0 z-50">
+        {/* Judul di Kiri */}
         <h2 className="text-2xl font-semibold text-gray-900 flex items-center gap-2">
-          🧩 Tambah Soal Ujian
+          🧩 Tambah Ujian
         </h2>
+
+        {/* Tombol di Kanan */}
+        <div className="flex gap-3">
+          <button
+            type="submit"
+            form="form-ujian" // <--- TAMBAHKAN INI
+            className="flex items-center gap-2 py-2.5 px-5 rounded-md bg-blue-600 text-white font-semibold shadow hover:bg-blue-700 transition"
+          >
+            <FaSave className="w-4 h-4" />
+            Simpan Semua Soal
+          </button>
+        </div>
+
       </div>
 
       {/* FORM */}
       <div className="p-6 md:p-10">
-        <form onSubmit={handleSubmit} className="space-y-8 max-w-5xl mx-auto">
+        <form id="form-ujian" onSubmit={handleSubmit} className="space-y-8 max-w-5xl mx-auto">
           {/* PENGATURAN UJIAN */}
           <fieldset className={fieldsetClass}>
             <div className="flex items-center gap-2 mb-5 border-b pb-2 border-gray-200">
@@ -260,8 +320,9 @@ const TambahSoal = () => {
                 />
               </div>
 
+              {/* JENDELA AKSES (TANGGAL) */}
               <div className="relative">
-                <label className={labelClass}>Tanggal Pengerjaan</label>
+                <label className={labelClass}>Tanggal Mulai (Akses Dibuka)</label>
                 <div className="absolute inset-y-0 left-3 flex items-center pt-6 z-10">
                   <FaCalendarAlt className="text-gray-400" />
                 </div>
@@ -275,7 +336,24 @@ const TambahSoal = () => {
               </div>
 
               <div className="relative">
-                <label className={labelClass}>Jam Mulai</label>
+                <label className={labelClass}>
+                  Tanggal Berakhir (Akses Ditutup)
+                </label>
+                <div className="absolute inset-y-0 left-3 flex items-center pt-6 z-10">
+                  <FaCalendarAlt className="text-gray-400" />
+                </div>
+                <input
+                  type="date"
+                  value={tanggalBerakhir}
+                  onChange={(e) => setTanggalBerakhir(e.target.value)}
+                  className={`${inputClass} pl-10`}
+                  required
+                />
+              </div>
+
+              {/* JENDELA AKSES (JAM) */}
+              <div className="relative">
+                <label className={labelClass}>Jam Mulai (Akses Dibuka)</label>
                 <div className="absolute inset-y-0 left-3 flex items-center pt-6 z-10">
                   <FaClock className="text-gray-400" />
                 </div>
@@ -289,7 +367,7 @@ const TambahSoal = () => {
               </div>
 
               <div className="relative">
-                <label className={labelClass}>Jam Berakhir</label>
+                <label className={labelClass}>Jam Berakhir (Akses Ditutup)</label>
                 <div className="absolute inset-y-0 left-3 flex items-center pt-6 z-10">
                   <FaClock className="text-gray-400" />
                 </div>
@@ -300,6 +378,24 @@ const TambahSoal = () => {
                   className={`${inputClass} pl-10`}
                   required
                 />
+              </div>
+
+              {/* FIELD DURASI */}
+              <div className="md:col-span-2">
+                <label className={labelClass}>Durasi Pengerjaan (Menit)</label>
+                <input
+                  type="number"
+                  min="1"
+                  value={durasi}
+                  onChange={(e) => setDurasi(e.target.value)}
+                  className={inputClass}
+                  placeholder="Contoh: 90"
+                  required
+                />
+                <p className="text-xs text-gray-500 mt-1">
+                  Ini adalah waktu hitung mundur yang akan didapat peserta setelah
+                  menekan tombol "Mulai".
+                </p>
               </div>
             </div>
 
@@ -362,6 +458,7 @@ const TambahSoal = () => {
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div>
                   <label className={labelClass}>Tipe Soal</label>
+                  {/* <-- PERUBAHAN DI SINI --> */}
                   <select
                     value={soal.tipeSoal}
                     onChange={(e) =>
@@ -370,8 +467,10 @@ const TambahSoal = () => {
                     className={inputClass}
                   >
                     <option value="pilihanGanda">Pilihan Ganda</option>
-                    <option value="esay">Esai</option>
+                    <option value="teksSingkat">Teks Singkat (Auto-Nilai)</option>
+                    <option value="esay">Esai (Nilai Manual)</option>
                   </select>
+                  {/* <-- AKHIR PERUBAHAN --> */}
                 </div>
 
                 <div className="md:col-span-2">
@@ -440,6 +539,37 @@ const TambahSoal = () => {
                 </div>
               )}
 
+              {/* <-- PERUBAHAN DI SINI (BLOK BARU) --> */}
+              {/* Kunci Jawaban Teks Singkat */}
+              {soal.tipeSoal === "teksSingkat" && (
+                <div className="mt-5 border-t border-gray-200 pt-4">
+                  <h4 className="text-base font-semibold text-gray-800 mb-2">
+                    Kunci Jawaban
+                  </h4>
+                  <input
+                    type="text"
+                    placeholder="Masukkan jawaban singkat yang benar (case-insensitive)"
+                    value={soal.kunciJawabanText}
+                    onChange={(e) =>
+                      handleSoalChange(
+                        soal.id,
+                        "kunciJawabanText",
+                        e.target.value
+                      )
+                    }
+                    className={inputClass}
+                    required
+                  />
+                  <p className="text-xs text-gray-500 mt-1">
+                    Gunakan tanda <b>,</b> (tanda koma) untuk memisahkan jika
+                    ada lebih dari satu jawaban benar.
+                    <br />
+                    Contoh: <b>2 , dua , 2 (dua)</b>
+                  </p>
+                </div>
+              )}
+              {/* <-- AKHIR PERUBAHAN --> */}
+
               {/* Info Esai */}
               {soal.tipeSoal === "esay" && (
                 <div className="bg-blue-50 border-l-4 border-blue-400 p-3 rounded-r-md mt-4">
@@ -463,14 +593,6 @@ const TambahSoal = () => {
             >
               <FaPlus className="w-4 h-4" />
               Tambah Soal Lagi
-            </button>
-
-            <button
-              type="submit"
-              className="flex items-center gap-2 py-2.5 px-5 rounded-md bg-blue-600 text-white font-semibold shadow hover:bg-blue-700 transition"
-            >
-              <FaSave className="w-4 h-4" />
-              Simpan Semua Soal
             </button>
           </div>
         </form>

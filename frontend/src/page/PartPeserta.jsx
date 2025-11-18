@@ -1,376 +1,337 @@
 import React, { useState, useEffect } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
+import StatusUjian from "../component/statusujian";
+
 import {
   FaUser,
-  FaCalendarAlt,
   FaPhoneAlt,
   FaEnvelope,
-  FaTransgender,
-  FaHome,
-  FaInstagram,
   FaArrowRight,
   FaArrowLeft,
+  FaLock,
+  FaCheckCircle,
+  FaSpinner,
 } from "react-icons/fa";
 
 const API_URL = "http://localhost:5000";
 
 const PartPeserta = () => {
   const navigate = useNavigate();
-  const { id } = useParams();  // Get `id` from URL params
 
-  // ===== STATE =====
   const [form, setForm] = useState({
     nama: "",
-    ttl: "",
     nohp: "",
     email: "",
-    jenisKelamin: "",
-    alamat: "",
-    sosmed: "",
   });
 
-  const [pesertaId, setPesertaId] = useState(null); // ID peserta untuk edit
-  const [submitted, setSubmitted] = useState(false); // Status setelah klik Simpan & Lanjut
+  const [pesertaId, setPesertaId] = useState(null);
+  const [submitted, setSubmitted] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [popup, setPopup] = useState({
+    isOpen: false,
+    message: "",
+  });
 
-  // ===== LOAD DATA DARI SERVER (Jika ada pesertaId) =====
+  const handleClosePopup = () => {
+    setPopup({ isOpen: false, message: "" });
+  };
+
   useEffect(() => {
-    if (id) {
-      // Fetch data peserta berdasarkan ID
-      const fetchPesertaData = async () => {
-        try {
-          const res = await fetch(`http://localhost:5000/api/peserta/${id}`);
-          const data = await res.json();
-          if (res.ok) {
-            setPesertaId(id); // Set pesertaId untuk edit mode
-            setForm({
-              nama: data.nama,
-              ttl: data.ttl,
-              nohp: data.nohp,
-              email: data.email,
-              jenisKelamin: data.jenis_kelamin,
-              alamat: data.alamat,
-              sosmed: data.sosmed,
-            });
-          } else {
-            alert("Data peserta tidak ditemukan!");
-          }
-        } catch (err) {
-          console.error("Gagal mengambil data peserta:", err);
-          alert("Gagal mengambil data peserta.");
-        }
-      };
-      fetchPesertaData();
-    }
-  }, [id]); // Memanggil ulang useEffect jika `id` berubah
+    const loginData = JSON.parse(localStorage.getItem("loginPeserta"));
+    if (loginData && loginData.email) {
+      setForm((prev) => ({ ...prev, email: loginData.email }));
 
-  // ===== HANDLER CHANGE =====
+      const existingPesertaData = JSON.parse(
+        localStorage.getItem("pesertaData")
+      );
+      if (
+        existingPesertaData &&
+        existingPesertaData.id &&
+        existingPesertaData.email === loginData.email
+      ) {
+        setPesertaId(existingPesertaData.id);
+        setForm((prev) => ({
+          ...prev,
+          nama: prev.nama || existingPesertaData.nama,
+          nohp: prev.nohp || existingPesertaData.nohp,
+        }));
+      }
+    } else {
+      alert("Sesi login tidak ditemukan. Harap login kembali.");
+      navigate("/");
+    }
+  }, [navigate]);
+
   const handleChange = (e) => {
     const { name, value } = e.target;
     setForm((prev) => ({ ...prev, [name]: value }));
   };
 
-  // ===== SUBMIT (SIMPAN & LANJUT) =====
   const handleSubmit = async (e) => {
     e.preventDefault();
 
-    // Validasi jika ada kolom yang kosong
-    const kosong = Object.entries(form).find(([_, v]) => !v.trim());
-    if (kosong) {
-      alert(`Kolom "${kosong[0]}" belum diisi.`);
+    if (!form.nama.trim() || !form.nohp.trim() || !form.email.trim()) {
+      alert("Semua kolom wajib diisi.");
       return;
     }
+    setSubmitted(true);
+  };
+
+  const handleMulaiUjian = async () => {
+    if (isSaving) return;
+    setIsSaving(true);
 
     try {
       let res;
-      if (pesertaId) {
-        // Jika pesertaId ada, lakukan PUT (update)
-        res = await fetch(`http://localhost:5000/api/peserta/${pesertaId}`, {
+      let finalPesertaId = pesertaId;
+
+      const existingPesertaData = JSON.parse(
+        localStorage.getItem("pesertaData")
+      );
+      if (
+        existingPesertaData &&
+        existingPesertaData.id &&
+        existingPesertaData.email === form.email
+      ) {
+        finalPesertaId = existingPesertaData.id;
+      }
+
+      const payload = { ...form };
+
+      if (finalPesertaId) {
+        res = await fetch(`${API_URL}/api/peserta/${finalPesertaId}`, {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(form),
+          body: JSON.stringify(payload),
         });
       } else {
-        // Jika tidak ada pesertaId, lakukan POST (create)
-        res = await fetch("http://localhost:5000/api/peserta", {
+        res = await fetch(`${API_URL}/api/peserta`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(form),
+          body: JSON.stringify(payload),
         });
       }
 
       const data = await res.json();
-      if (!res.ok) throw new Error(data.message);
+      if (!res.ok)
+        throw new Error(data.message || "Gagal menyimpan data peserta.");
 
-      setPesertaId(data.id);
+      const newPesertaId = finalPesertaId || data.id;
 
-      // Simpan ID peserta di localStorage jika peserta baru
-      const pesertaData = { id: data.id, ...form };
+      if (!newPesertaId) {
+        setIsSaving(false); 
+        setPopup({
+          isOpen: true,
+          message: "Gagal mendapatkan ID Peserta dari server. Data tidak tersimpan. Silakan coba lagi.",
+        });
+        return;
+      }
+
+      setPesertaId(newPesertaId);
+
+      const pesertaData = { id: newPesertaId, ...form };
       localStorage.setItem("pesertaData", JSON.stringify(pesertaData));
 
-      setSubmitted(true); // Menampilkan pesan sukses
+      const loginData = JSON.parse(localStorage.getItem("loginPeserta"));
+      if (!loginData || !loginData.examId) {
+        throw new Error("Data login (ID Ujian) tidak ditemukan. Harap login ulang.");
+      }
+
+      const examId = loginData.examId;
+      const resUjian = await fetch(`${API_URL}/api/ujian/check-active/${examId}`);
+      const ujianData = await resUjian.json();
+
+      if (!resUjian.ok) {
+        throw new Error(ujianData.message || "Gagal memverifikasi ujian.");
+      }
+
+      navigate(`/ujian/${ujianData.id}`);
     } catch (err) {
-      alert("Gagal menyimpan data peserta: " + err.message);
+      setPopup({
+        isOpen: true,
+        message: err.message || "Gagal memuat ujian.",
+      });
+      setIsSaving(false);
     }
   };
 
-  // ===== LANJUT UJIAN =====
-  const handleMulaiUjian = async () => {
-  try {
-    const today = new Date();
-    const localToday = today.toISOString().split("T")[0];
-
-    const res = await fetch(`${API_URL}/api/ujian/tanggal/${localToday}`);
-    const ujianHariIni = await res.json();
-
-    if (!res.ok) {
-      alert(ujianHariIni.message || "Belum ada ujian aktif untuk hari ini.");
-      return;
-    }
-
-    navigate(`/ujian/${ujianHariIni.id}`);
-  } catch (err) {
-    alert("Gagal memuat ujian: " + err.message);
-  }
-};
-
-
-  const handleKembali = async () => {
-  const backupForm = { ...form };  // Menyimpan backup form untuk mengisi data sementara
-
-  if (!pesertaId) {
-    setSubmitted(false);
-    return;
-  }
-
-  try {
-    // Hapus data peserta dari database menggunakan DELETE
-    const res = await fetch(`${API_URL}/api/peserta/${pesertaId}`, {
-      method: "DELETE",
-    });
-
-    if (res.ok) {
-      // Hapus data dari localStorage (untuk pengguna lain)
-      localStorage.removeItem("pesertaData");
-
-      // Reset pesertaId dan form untuk melanjutkan pengeditan
-      setPesertaId(null);
-      setForm(backupForm);  // Form tetap diisi sementara, akan reset setelah halaman refresh
-      setSubmitted(false);  // Reset status pengiriman form
-
-    } 
-  } catch (err) {
-    console.error("Gagal menghapus data peserta:", err);
-  }
-};
-
-
-
   return (
-    <div className="min-h-screen flex flex-col bg-gray-50">
-      {/* NAVBAR */}
-      <header className="bg-white shadow-md border-b border-gray-200 sticky top-0 z-50">
-        <div className="max-w-5xl mx-auto flex justify-between items-center px-6 py-4">
-          <h1 className="text-xl md:text-2xl font-bold text-gray-800 tracking-wide">
-            🧾 Formulir Data Diri Peserta
-          </h1>
-          <span className="text-sm text-gray-500 font-medium">Ujian ID: {id}</span>
-        </div>
-      </header>
+    <>
+      <StatusUjian
+        isOpen={popup.isOpen}
+        message={popup.message}
+        onClose={handleClosePopup}
+      />
 
-      {/* MAIN */}
-      <main className="flex-1 flex items-center justify-center px-4 py-10">
-        <div className="w-full max-w-4xl bg-white shadow-xl rounded-2xl border border-gray-200 overflow-hidden">
-          {!submitted ? (
-            <form
-              onSubmit={handleSubmit}
-              className="p-10 grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-6"
-            >
-              {/* Nama */}
-              <div className="md:col-span-2">
-                <label className="block text-sm font-semibold text-gray-700 mb-1">
-                  <FaUser className="inline-block mr-1 text-blue-500" />
-                  Nama Lengkap (Sesuai KTP)
-                </label>
-                <input
-                  type="text"
-                  name="nama"
-                  value={form.nama}
-                  onChange={handleChange}
-                  className="w-full border border-gray-300 rounded-lg px-4 py-2.5 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition"
-                  required
-                />
-              </div>
+      {/* Konten utama diubah menjadi flex-1 untuk mengisi <main> dari layout */}
+      <div className="flex-1 flex items-center justify-center p-4 md:p-8 bg-gray-50/50">
+        <div className="w-full max-w-md">
+          <div className="bg-white shadow-xl ring-1 ring-gray-900/5 rounded-2xl overflow-hidden">
+            {!submitted ? (
+              /* === FORM INPUT === */
+              <form onSubmit={handleSubmit} className="p-8 space-y-6">
+                <div className="text-center mb-8">
+                  <h2 className="text-2xl font-bold text-gray-900">
+                    Lengkapi Data
+                  </h2>
+                  <p className="text-sm text-gray-500 mt-2">
+                    Mohon isi data diri Anda dengan benar sebelum memulai ujian.
+                  </p>
+                </div>
 
-              {/* TTL */}
-              <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-1">
-                  <FaCalendarAlt className="inline-block mr-1 text-blue-500" />
-                  Tempat & Tanggal Lahir
-                </label>
-                <input
-                  type="text"
-                  name="ttl"
-                  value={form.ttl}
-                  onChange={handleChange}
-                  className="w-full border border-gray-300 rounded-lg px-4 py-2.5 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition"
-                  required
-                />
-              </div>
+                {/* Nama */}
+                <div className="space-y-1">
+                  <label className="block text-sm font-medium text-gray-700">
+                    Nama Lengkap (Sesuai KTP)
+                  </label>
+                  <div className="relative">
+                    <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                      <FaUser className="text-gray-400" />
+                    </div>
+                    <input
+                      type="text"
+                      name="nama"
+                      value={form.nama}
+                      onChange={handleChange}
+                      className="block w-full pl-10 pr-3 py-3 border border-gray-300 rounded-xl shadow-sm placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all duration-200 sm:text-sm"
+                      placeholder="Masukan Nama Anda Disini"
+                      required
+                    />
+                  </div>
+                </div>
 
-              {/* Jenis Kelamin */}
-              <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-1">
-                  <FaTransgender className="inline-block mr-1 text-blue-500" />
-                  Jenis Kelamin
-                </label>
-                <select
-                  name="jenisKelamin"
-                  value={form.jenisKelamin}
-                  onChange={handleChange}
-                  className="w-full border border-gray-300 rounded-lg px-4 py-2.5 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition"
-                  required
-                >
-                  <option value="">-- Pilih Jenis Kelamin --</option>
-                  <option value="Laki-laki">Laki-laki</option>
-                  <option value="Perempuan">Perempuan</option>
-                </select>
-              </div>
+                {/* No HP */}
+                <div className="space-y-1">
+                  <label className="block text-sm font-medium text-gray-700">
+                    Nomor WhatsApp Aktif
+                  </label>
+                  <div className="relative">
+                    <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                      <FaPhoneAlt className="text-gray-400" />
+                    </div>
+                    <input
+                      type="tel"
+                      name="nohp"
+                      value={form.nohp}
+                      onChange={handleChange}
+                      className="block w-full pl-10 pr-3 py-3 border border-gray-300 rounded-xl shadow-sm placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all duration-200 sm:text-sm"
+                      placeholder="Masukan Nomor Anda Disini"
+                      required
+                    />
+                  </div>
+                </div>
 
-              {/* No HP */}
-              <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-1">
-                  <FaPhoneAlt className="inline-block mr-1 text-blue-500" />
-                  Nomor HP Aktif
-                </label>
-                <input
-                  type="tel"
-                  name="nohp"
-                  value={form.nohp}
-                  onChange={handleChange}
-                  className="w-full border border-gray-300 rounded-lg px-4 py-2.5 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition"
-                  required
-                />
-              </div>
+                {/* Email (Read-Only) */}
+                <div className="space-y-1">
+                  <label className="block text-sm font-medium text-gray-700">
+                    Email Terdaftar
+                  </label>
+                  <div className="relative">
+                    <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                      <FaEnvelope className="text-gray-400" />
+                    </div>
+                    <input
+                      type="email"
+                      name="email"
+                      value={form.email}
+                      readOnly
+                      disabled
+                      className="block w-full pl-10 pr-10 py-3 border border-gray-200 bg-gray-50 text-gray-500 rounded-xl shadow-sm sm:text-sm cursor-not-allowed font-medium"
+                    />
+                    <div className="absolute inset-y-0 right-0 pr-3 flex items-center pointer-events-none">
+                      <FaLock
+                        className="text-gray-400"
+                        title="Terkunci dari login"
+                      />
+                    </div>
+                  </div>
+                  <p className="text-xs text-gray-400 mt-1">
+                    Email dikunci sesuai data login Anda.
+                  </p>
+                </div>
 
-              {/* Email */}
-              <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-1">
-                  <FaEnvelope className="inline-block mr-1 text-blue-500" />
-                  Email Aktif
-                </label>
-                <input
-                  type="email"
-                  name="email"
-                  value={form.email}
-                  onChange={handleChange}
-                  className="w-full border border-gray-300 rounded-lg px-4 py-2.5 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition"
-                  required
-                />
-              </div>
-
-              {/* Sosmed */}
-              <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-1">
-                  <FaInstagram className="inline-block mr-1 text-blue-500" />
-                  Akun Media Sosial
-                </label>
-                <input
-                  type="text"
-                  name="sosmed"
-                  value={form.sosmed}
-                  onChange={handleChange}
-                  className="w-full border border-gray-300 rounded-lg px-4 py-2.5 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition"
-                  required
-                />
-              </div>
-
-              {/* Alamat */}
-              <div className="md:col-span-2">
-                <label className="block text-sm font-semibold text-gray-700 mb-1">
-                  <FaHome className="inline-block mr-1 text-blue-500" />
-                  Alamat Sesuai KTP
-                </label>
-                <textarea
-                  name="alamat"
-                  value={form.alamat}
-                  onChange={handleChange}
-                  className="w-full border border-gray-300 rounded-lg px-4 py-2.5 min-h-[80px] focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition"
-                  required
-                ></textarea>
-              </div>
-
-              {/* Submit */}
-              <div className="md:col-span-2 pt-4">
+                {/* Submit Button */}
                 <button
                   type="submit"
-                  className="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 rounded-lg shadow-md transition flex items-center justify-center gap-2 text-base"
+                  className="w-full flex justify-center items-center gap-2 py-3.5 px-4 border border-transparent rounded-xl shadow-sm text-sm font-bold text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition-all duration-200"
                 >
-                  <FaArrowRight />
-                  Simpan & Lanjut
+                  Simpan & Lanjutkan <FaArrowRight />
                 </button>
-              </div>
-            </form>
-          ) : (
-            <div className="p-10 text-center">
-              <h2 className="text-2xl font-bold text-gray-800 mb-5">
-                Mohon Cek Kembali Data Anda Sebelum Melanjutkan
-              </h2>
+              </form>
+            ) : (
+              /* === KONFIRMASI DATA (DENGAN TOMBOL KEMBALI) === */
+              <div className="p-8 text-center">
+                <div className="mx-auto flex items-center justify-center h-16 w-16 rounded-full bg-green-100 mb-6">
+                  <FaCheckCircle className="h-8 w-8 text-green-600" />
+                </div>
+                <h2 className="text-2xl font-bold text-gray-900 mb-2">
+                  Data Siap!
+                </h2>
+                <p className="text-sm text-gray-500 mb-8">
+                  Periksa kembali data Anda. Jika sudah benar, silakan mulai
+                  ujian.
+                </p>
 
-              <div className="text-left bg-gray-50 rounded-lg border border-gray-200 p-6 mb-8 shadow-sm">
-                <h3 className="text-lg font-semibold text-gray-800 mb-3">
-                  📋 Rangkuman Data Peserta:
-                </h3>
-                <ul className="text-gray-700 leading-relaxed space-y-1">
-                  <li>
-                    <strong>Nama:</strong> {form.nama}
-                  </li>
-                  <li>
-                    <strong>Tempat & Tanggal Lahir:</strong> {form.ttl}
-                  </li>
-                  <li>
-                    <strong>Nomor HP:</strong> {form.nohp}
-                  </li>
-                  <li>
-                    <strong>Email:</strong> {form.email}
-                  </li>
-                  <li>
-                    <strong>Jenis Kelamin:</strong> {form.jenisKelamin}
-                  </li>
-                  <li>
-                    <strong>Alamat:</strong> {form.alamat}
-                  </li>
-                  <li>
-                    <strong>Akun Media Sosial:</strong> {form.sosmed}
-                  </li>
-                </ul>
-              </div>
+                <div className="bg-gray-50 rounded-xl border border-gray-200 p-5 mb-8 text-sm text-left shadow-inner">
+                  <ul className="space-y-3">
+                    <li className="flex flex-col sm:flex-row sm:justify-between">
+                      <span className="text-gray-500 mb-1 sm:mb-0">
+                        Nama Lengkap:
+                      </span>
+                      <span className="font-semibold text-gray-900 break-words text-right">
+                        {form.nama}
+                      </span>
+                    </li>
+                    <li className="border-t border-gray-200 my-2"></li>
+                    <li className="flex flex-col sm:flex-row sm:justify-between">
+                      <span className="text-gray-500 mb-1 sm:mb-0">
+                        Nomor HP:
+                      </span>
+                      <span className="font-semibold text-gray-900 text-right">
+                        {form.nohp}
+                      </span>
+                    </li>
+                    <li className="border-t border-gray-200 my-2"></li>
+                    <li className="flex flex-col sm:flex-row sm:justify-between">
+                      <span className="text-gray-500 mb-1 sm:mb-0">Email:</span>
+                      <span className="font-semibold text-gray-900 break-all text-right">
+                        {form.email}
+                      </span>
+                    </li>
+                  </ul>
+                </div>
 
-              <div className="flex flex-col md:flex-row gap-4 justify-center">
-                <button
-                  onClick={handleKembali}
-                  className="w-full md:w-1/2 bg-gray-300 hover:bg-gray-400 text-gray-800 font-semibold py-3 rounded-lg shadow-md transition flex items-center justify-center gap-2 text-base"
-                >
-                  <FaArrowLeft />
-                  Kembali (Edit)
-                </button>
+                <div className="flex flex-col gap-3">
+                  <button
+                    onClick={handleMulaiUjian}
+                    disabled={isSaving}
+                    className={`w-full flex justify-center items-center gap-2 py-3.5 px-4 border border-transparent rounded-xl shadow-lg text-sm font-bold text-white transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] ${isSaving
+                        ? "bg-green-300 cursor-not-allowed"
+                        : "bg-green-600 hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500"
+                      }`}
+                  >
+                    {isSaving ? (
+                      <FaSpinner className="animate-spin" />
+                    ) : (
+                      "🚀"
+                    )}
+                    {isSaving ? "Memproses..." : "Mulai Ujian Sekarang"}
+                  </button>
 
-                <button
-                  onClick={handleMulaiUjian}
-                  className="w-full md:w-1/2 bg-green-600 hover:bg-green-700 text-white font-semibold py-3 rounded-lg shadow-md transition flex items-center justify-center gap-2 text-base"
-                >
-                  Mulai Ujian Sekarang
-                  <FaArrowRight />
-                </button>
+                  <button
+                    onClick={() => setSubmitted(false)}
+                    disabled={isSaving}
+                    className="w-full flex justify-center items-center gap-2 py-3 px-4 border border-gray-300 rounded-xl shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition-all duration-200 disabled:opacity-50"
+                  >
+                    <FaArrowLeft /> Edit Data Kembali
+                  </button>
+                </div>
               </div>
-            </div>
-          )}
+            )}
+          </div>
         </div>
-      </main>
-
-      <footer className="text-center text-sm text-gray-400 py-4 border-t border-gray-200">
-        © {new Date().getFullYear()} BPS Kota Salatiga. All rights reserved.
-      </footer>
-    </div>
+      </div>
+    </>
   );
 };
 

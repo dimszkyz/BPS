@@ -106,10 +106,17 @@ const DashboardAdmin = () => {
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
+      const token = sessionStorage.getItem("adminToken");
+      if (!token) {
+        console.error("Token admin tidak ditemukan di sessionStorage.");
+        return; 
+      }
+      const headers = { Authorization: `Bearer ${token}` }; // Siapkan header
+
       const [resUjian, resHasil, resUndangan] = await Promise.allSettled([
-        fetch(`${API_URL}/api/ujian`),
-        fetch(`${API_URL}/api/hasil`),
-        fetch(`${API_URL}/api/invite/list`),
+        fetch(`${API_URL}/api/ujian`, { headers }),       // <-- Tambah headers
+        fetch(`${API_URL}/api/hasil`, { headers }),       // <-- Tambah headers
+        fetch(`${API_URL}/api/invite/list`, { headers }), // <-- Tambah headers
       ]);
 
       let totalUjian = 0,
@@ -183,7 +190,7 @@ const DashboardAdmin = () => {
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
             <StatCard
               to="/admin/daftar-soal"
-              label="Total Ujian Dibuat"
+              label="Daftar Ujian Tersedia"
               value={stats.totalUjian}
               color="border-blue-500"
               icon={<FaListUl className="text-blue-500 text-2xl" />}
@@ -212,7 +219,7 @@ const DashboardAdmin = () => {
             >
               <div>
                 <h3 className="text-xl font-semibold text-gray-800">
-                  Buat Ujian Baru
+                  Tambah Ujian
                 </h3>
                 <p className="text-gray-500 text-sm mt-1">
                   Mulai rancang soal pilihan ganda atau esai.

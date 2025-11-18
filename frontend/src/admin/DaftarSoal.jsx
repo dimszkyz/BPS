@@ -1,16 +1,74 @@
 import React, { useEffect, useState } from "react";
-import { FaEdit, FaTrash, FaListUl, FaSyncAlt, FaCopy } from "react-icons/fa";
+import {
+  FaEdit,
+  FaTrash,
+  FaListUl,
+  FaSyncAlt,
+  FaCopy,
+  FaExclamationTriangle,
+  FaCheckCircle, // <-- 1. TAMBAHKAN ICON INI
+} from "react-icons/fa";
 import { useNavigate } from "react-router-dom";
 
 const API_URL = "http://localhost:5000";
+
+// ===============================================
+// ▼▼▼ KOMPONEN MODAL BARU ▼▼▼
+// ===============================================
+const KonfirmasiModal = ({ show, message, onCancel, onConfirm }) => {
+  if (!show) return null;
+
+  return (
+    // Latar belakang overlay
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-[1px]">
+      {/* Konten Modal */}
+      <div className="bg-white p-6 rounded-lg shadow-xl w-full max-w-sm">
+        <div className="flex items-center gap-3 mb-4">
+          <FaExclamationTriangle className="text-yellow-500 text-2xl" />
+          <h3 className="text-lg font-semibold text-gray-800">Konfirmasi</h3>
+        </div>
+        <p className="text-gray-700 mb-6">{message}</p>
+        
+        {/* Tombol Aksi */}
+        <div className="flex justify-end gap-3">
+          <button
+            onClick={onCancel}
+            className="px-4 py-2 rounded-md bg-gray-200 text-gray-800 font-semibold hover:bg-gray-300 transition"
+          >
+            Batal
+          </button>
+          <button
+            onClick={onConfirm}
+            className="px-4 py-2 rounded-md bg-blue-600 text-white font-semibold hover:bg-blue-700 transition"
+          >
+            OK
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+// ===============================================
+// ▲▲▲ AKHIR KOMPONEN MODAL ▲▲▲
+// ===============================================
 
 const DaftarSoal = () => {
   const [daftarUjian, setDaftarUjian] = useState([]);
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
 
+  // State baru untuk modal
+  const [modalState, setModalState] = useState({
+    show: false,
+    message: "",
+    onConfirm: () => {},
+  });
+
+  // 2. TAMBAHKAN STATE UNTUK TOAST
+  const [successMessage, setSuccessMessage] = useState("");
+
   // =============================
-  // Helper tanggal & waktu
+  // Helper tanggal
   // =============================
   const pad2 = (n) => String(n).padStart(2, "0");
 
@@ -30,30 +88,16 @@ const DaftarSoal = () => {
     return `${d}-${m}-${y}`;
   };
 
-  const waktuKeMenit = (hhmm) => {
-    if (!hhmm) return null;
-    const [hh, mm] = hhmm.split(":").map((x) => parseInt(x, 10));
-    if (Number.isNaN(hh) || Number.isNaN(mm)) return null;
-    return hh * 60 + mm;
-  };
-
-  const durasiMenit = (jm, jb) => {
-    const a = waktuKeMenit(jm);
-    const b = waktuKeMenit(jb);
-    if (a == null || b == null) return "-";
-    // handle lintas tengah malam
-    let diff = b - a;
-    if (diff <= 0) diff += 24 * 60;
-    return diff;
-  };
-
   // =============================
   // Ambil semua ujian
   // =============================
   const fetchUjian = async () => {
     try {
       setLoading(true);
-      const res = await fetch(`${API_URL}/api/ujian`);
+      const token = sessionStorage.getItem("adminToken");
+      const res = await fetch(`${API_URL}/api/ujian`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
       const data = await res.json();
 
       const sortedData = [...data].sort(
@@ -68,16 +112,42 @@ const DaftarSoal = () => {
     }
   };
 
-  // =============================
-  // Hapus ujian
-  // =============================
-  const handleDelete = async (id) => {
-    if (!window.confirm("Yakin ingin menghapus ujian ini?")) return;
+  // =============================================
+  // ▼▼▼ FUNGSI MODAL & AKSI (DIPERBARUI) ▼▼▼
+  // =============================================
+  
+  // Fungsi untuk menutup modal
+  const handleCloseModal = () => {
+    setModalState({ show: false, message: "", onConfirm: () => {} });
+  };
+
+  // Fungsi yang dipanggil saat tombol OK di modal diklik
+  const handleConfirmModal = () => {
+    modalState.onConfirm(); // Jalankan fungsi yang disimpan (prosesHapus atau prosesSalin)
+    handleCloseModal(); // Tutup modal
+  };
+
+  // --- LOGIKA HAPUS ---
+  // 1. Ini adalah logika inti yang akan dijalankan
+  const prosesHapus = async (id) => {
     try {
-      const res = await fetch(`${API_URL}/api/ujian/${id}`, { method: "DELETE" });
+      const token = sessionStorage.getItem("adminToken");
+      if (!token) throw new Error("Token tidak ditemukan.");
+
+      const res = await fetch(`${API_URL}/api/ujian/${id}`, {
+        method: "DELETE",
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
       const data = await res.json();
       if (!res.ok) throw new Error(data.message || "Gagal hapus ujian");
-      alert("Ujian berhasil dihapus");
+      
+      // 4. UBAH DARI ALERT KE TOAST
+      setSuccessMessage("Ujian berhasil dihapus");
+      setTimeout(() => setSuccessMessage(""), 3000); // Hilang setelah 3 detik
+
       fetchUjian();
     } catch (err) {
       console.error("Error hapus:", err);
@@ -85,34 +155,48 @@ const DaftarSoal = () => {
     }
   };
 
-  // =============================
-  // ✳️ Salin ujian (duplikasi)
-  // =============================
-  const handleSalin = async (ujian) => {
-    if (!window.confirm("Yakin ingin menyalin ujian ini?")) return;
+  // 2. Ini adalah fungsi yang dipanggil tombol (hanya membuka modal)
+  const handleDelete = (id) => {
+    setModalState({
+      show: true,
+      message: "Yakin ingin menghapus ujian ini?",
+      onConfirm: () => prosesHapus(id), // Simpan fungsi prosesHapus untuk dijalankan
+    });
+  };
 
+  // --- LOGIKA SALIN ---
+  // 1. Ini adalah logika inti yang akan dijalankan
+  const prosesSalin = async (ujian) => {
     try {
-      // 1) Ambil detail ujian sumber
-      const resDetail = await fetch(`${API_URL}/api/ujian/${ujian.id}`);
+      const token = sessionStorage.getItem("adminToken");
+      if (!token) throw new Error("Token tidak ditemukan. Silakan login ulang.");
+
+      const resDetail = await fetch(`${API_URL}/api/ujian/${ujian.id}`, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
       const detailData = await resDetail.json();
       if (!resDetail.ok) {
         throw new Error(detailData.message || "Gagal memuat detail ujian.");
       }
 
-      // 2) Bentuk soalList baru (ikutkan path gambar lama)
       const soalList =
         Array.isArray(detailData.soalList) && detailData.soalList.length > 0
           ? detailData.soalList.map((soal) => ({
               tipeSoal: soal.tipeSoal,
               soalText: soal.soalText,
-              gambar: soal.gambar || null, // ⬅️ penting: pakai path lama jika ada
+              gambar: soal.gambar || null,
               pilihan:
                 soal.tipeSoal === "pilihanGanda"
-                  ? soal.pilihan.map((p) => ({ text: p.text }))
+                  ? soal.pilihan.map((p) => p.text)
                   : [],
               kunciJawabanText:
                 soal.tipeSoal === "pilihanGanda"
-                  ? (soal.pilihan.find((p) => p.isCorrect)?.text || "")
+                  ? soal.pilihan.find((p) => p.isCorrect)?.text || ""
+                  : soal.tipeSoal === "teksSingkat"
+                  ? soal.pilihan.find((p) => p.isCorrect)?.text || ""
                   : "",
             }))
           : [
@@ -120,12 +204,11 @@ const DaftarSoal = () => {
                 tipeSoal: "pilihanGanda",
                 soalText: "Salinan pertanyaan baru",
                 gambar: null,
-                pilihan: [{ text: "Pilihan 1" }, { text: "Pilihan 2" }],
+                pilihan: ["Pilihan 1", "Pilihan 2"],
                 kunciJawabanText: "Pilihan 1",
               },
             ];
 
-      // 3) Tanggal baru (pakai tanggal asli jika valid, else hari ini)
       let localDate = new Date().toISOString().split("T")[0];
       if (detailData.tanggal && !isNaN(new Date(detailData.tanggal))) {
         const original = new Date(detailData.tanggal);
@@ -136,8 +219,12 @@ const DaftarSoal = () => {
           .split("T")[0];
       }
 
-      // 4) Keterangan → naikkan (n) atau tambah (1)
-      const stripSalinan = (txt) => txt.replace(/\s*\(Salinan\)\s*$/i, "").trim();
+      let localDateBerakhir = detailData.tanggal_berakhir
+        ? toLocalDateOnly(detailData.tanggal_berakhir)
+        : localDate;
+
+      const stripSalinan = (txt) =>
+        txt.replace(/\s*\(Salinan\)\s*$/i, "").trim();
       const bumpOrOne = (txt) => {
         const m = txt.match(/\((\d+)\)\s*$/);
         if (m) {
@@ -148,43 +235,62 @@ const DaftarSoal = () => {
       };
       const newKeterangan = bumpOrOne(stripSalinan(detailData.keterangan || ""));
 
-      // 5) Jam mulai & berakhir (WAJIB buat API baru)
       const jamMulaiBaru = detailData.jam_mulai || "08:00";
       const jamBerakhirBaru = detailData.jam_berakhir || "09:00";
+      const durasiBaru = detailData.durasi || 60;
+      const acakSoalBaru = detailData.acak_soal || false;
 
-      // 6) Payload untuk POST /api/ujian (pakai field baru)
       const payload = {
-        data: JSON.stringify({
-          keterangan: newKeterangan,
-          tanggal: localDate,
-          jamMulai: jamMulaiBaru,
-          jamBerakhir: jamBerakhirBaru,
-          soalList,
-        }),
+        keterangan: newKeterangan,
+        tanggal: localDate,
+        tanggalBerakhir: localDateBerakhir,
+        jamMulai: jamMulaiBaru,
+        jamBerakhir: jamBerakhirBaru,
+        durasi: durasiBaru,
+        acakSoal: acakSoalBaru,
+        soalList,
       };
 
-      console.log("📦 Payload dikirim:", payload);
+      const formData = new FormData();
+      formData.append("data", JSON.stringify(payload));
 
       const resCopy = await fetch(`${API_URL}/api/ujian`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+        body: formData,
       });
 
       const copyResult = await resCopy.json();
-      console.log("📥 Respons server:", copyResult);
 
       if (!resCopy.ok) {
         throw new Error(copyResult.message || "Gagal menyimpan salinan ujian");
       }
+      
+      // 4. UBAH DARI ALERT KE TOAST
+      setSuccessMessage("Ujian berhasil disalin!");
+      setTimeout(() => setSuccessMessage(""), 3000); // Hilang setelah 3 detik
 
-      alert("✅ Ujian berhasil disalin!");
       fetchUjian();
     } catch (err) {
       console.error("Error salin:", err);
       alert("Terjadi kesalahan: " + err.message);
     }
   };
+
+  // 2. Ini adalah fungsi yang dipanggil tombol (hanya membuka modal)
+  const handleSalin = (ujian) => {
+    setModalState({
+      show: true,
+      message: "Yakin ingin menyalin ujian ini?",
+      onConfirm: () => prosesSalin(ujian), // Simpan fungsi prosesSalin untuk dijalankan
+    });
+  };
+
+  // =============================================
+  // ▲▲▲ AKHIR FUNGSI MODAL ▲▲▲
+  // =============================================
 
   useEffect(() => {
     fetchUjian();
@@ -195,11 +301,30 @@ const DaftarSoal = () => {
   // =============================
   return (
     <div className="bg-gray-50 min-h-screen flex flex-col">
+      {/* 3. TAMBAHKAN BLOK TOAST DI SINI */}
+      {successMessage && (
+        <div className="fixed top-20 left-1/2 -translate-x-1/2 z-50">
+          <div className="flex items-center gap-3 bg-green-600 text-white px-5 py-3 rounded-lg shadow-lg">
+            <FaCheckCircle className="text-white w-5 h-5" />
+            <span className="font-semibold text-base">{successMessage}</span>
+          </div>
+        </div>
+      )}
+
+      {/* Render Modal Konfirmasi di sini. */}
+      <KonfirmasiModal
+        show={modalState.show}
+        message={modalState.message}
+        onCancel={handleCloseModal}
+        onConfirm={handleConfirmModal}
+      />
+
       {/* NAVBAR STICKY */}
-      <div className="bg-white shadow-md border-b border-gray-300 px-8 py-4 flex justify-between items-center sticky top-0 z-50">
+      {/* Navbar z-40, Modal z-50, Toast z-50. Ini OK. */}
+      <div className="bg-white shadow-md border-b border-gray-300 px-8 py-4 flex justify-between items-center sticky top-0 z-40">
         <h2 className="text-xl font-semibold text-gray-900 flex items-center gap-2">
           <FaListUl className="text-blue-600 text-lg" />
-          Daftar Soal
+          Daftar Ujian
         </h2>
 
         <button
@@ -221,17 +346,35 @@ const DaftarSoal = () => {
             <table className="min-w-full text-sm text-left border-collapse border border-gray-200 table-fixed">
               <thead className="bg-gray-100 text-gray-700 uppercase text-xs">
                 <tr>
-                  <th className="py-3 px-5 w-[60px] border border-gray-200">No</th>
-                  <th className="py-3 px-5 w-[40%] border border-gray-200">Keterangan</th>
-                  <th className="py-3 px-5 w-[15%] border border-gray-200">Tanggal</th>
-                  <th className="py-3 px-5 w-[20%] border border-gray-200">Waktu</th>
-                  <th className="py-3 px-5 w-[10%] border border-gray-200">Durasi</th>
-                  <th className="py-3 px-5 w-[10%] text-center border border-gray-200">Aksi</th>
+                  <th className="py-3 px-5 w-[60px] border border-gray-200">
+                    No
+                  </th>
+                  <th className="py-3 px-5 w-[40%] border border-gray-200">
+                    Keterangan
+                  </th>
+                  <th className="py-3 px-5 w-[15%] border border-gray-200">
+                    Tanggal Mulai
+                  </th>
+                  <th className="py-3 px-5 w-[15%] border border-gray-200">
+                    Tanggal Akhir
+                  </th>
+                  <th className="py-3 px-5 w-[20%] border border-gray-200">
+                    Jendela Waktu
+                  </th>
+                  <th className="py-3 px-5 w-[10%] border border-gray-200">
+                    Durasi
+                  </th>
+                  <th className="py-3 px-5 w-[10%] text-center border border-gray-200">
+                    Aksi
+                  </th>
                 </tr>
               </thead>
               <tbody>
                 {daftarUjian.map((u, index) => (
-                  <tr key={u.id} className="hover:bg-gray-50 align-top border border-gray-200">
+                  <tr
+                    key={u.id}
+                    className="hover:bg-gray-50 align-top border border-gray-200"
+                  >
                     <td className="py-3 px-5 text-gray-700 border border-gray-200">
                       {index + 1}
                     </td>
@@ -242,12 +385,15 @@ const DaftarSoal = () => {
                       {formatTanggal(u.tanggal)}
                     </td>
                     <td className="py-3 px-5 whitespace-nowrap border border-gray-200">
-                      {(u.jam_mulai || "--:--") + " – " + (u.jam_berakhir || "--:--")}
+                      {formatTanggal(u.tanggal_berakhir)}
                     </td>
                     <td className="py-3 px-5 whitespace-nowrap border border-gray-200">
-                      {typeof durasiMenit(u.jam_mulai, u.jam_berakhir) === "number"
-                        ? `${durasiMenit(u.jam_mulai, u.jam_berakhir)} menit`
-                        : "-"}
+                      {(u.jam_mulai || "--:--") +
+                        " – " +
+                        (u.jam_berakhir || "--:--")}
+                    </td>
+                    <td className="py-3 px-5 whitespace-nowBrap border border-gray-200">
+                      {u.durasi ? `${u.durasi} menit` : "-"}
                     </td>
                     <td className="py-3 px-5 text-center border border-gray-200">
                       <div className="flex justify-center gap-3">
@@ -259,6 +405,7 @@ const DaftarSoal = () => {
                           <FaEdit />
                         </button>
                         <button
+                          // Panggil handleSalin (pembuka modal), bukan prosesSalin
                           onClick={() => handleSalin(u)}
                           className="text-green-600 hover:text-green-800 transition"
                           title="Salin Ujian"
@@ -266,6 +413,7 @@ const DaftarSoal = () => {
                           <FaCopy />
                         </button>
                         <button
+                          // Panggil handleDelete (pembuka modal), bukan prosesHapus
                           onClick={() => handleDelete(u.id)}
                           className="text-red-500 hover:text-red-700 transition"
                           title="Hapus Ujian"

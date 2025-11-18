@@ -1,12 +1,19 @@
-import React, { useState } from "react";
+// File: src/admin/TambahPeserta.jsx
+
+import React, { useState, useEffect } from "react";
 import {
   FaEnvelope,
   FaSyncAlt,
   FaPaperPlane,
   FaPlus,
   FaTimes,
+  FaListUl,
+  FaKey,
+  FaCog, // Ikon untuk tombol pengaturan
+  FaCheckCircle, // <-- DITAMBAHKAN
 } from "react-icons/fa";
 import DaftarUndangan from "./DaftarUndangan";
+import EmailPengirim from "./EmailPengirim"; // Import komponen modal pengaturan email
 
 const API_URL = "http://localhost:5000";
 
@@ -20,6 +27,42 @@ const TambahPeserta = () => {
   const [loading, setLoading] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
 
+  // --- State Ujian & Batas Login ---
+  const [ujianList, setUjianList] = useState([]);
+  const [selectedExamId, setSelectedExamId] = useState("");
+  const [loadingUjian, setLoadingUjian] = useState(true);
+  const [maxLogins, setMaxLogins] = useState(1);
+
+  // --- STATE UNTUK MODAL PENGATURAN EMAIL ---
+  const [showEmailSettings, setShowEmailSettings] = useState(false);
+
+  // --- STATE UNTUK TOAST ---
+  const [successMessage, setSuccessMessage] = useState(""); // <-- DITAMBAHKAN
+
+  // --- Fetch Daftar Ujian saat komponen dimuat ---
+  useEffect(() => {
+    const fetchUjianList = async () => {
+      try {
+        setLoadingUjian(true);
+        const token = sessionStorage.getItem("adminToken");
+        const res = await fetch(`${API_URL}/api/ujian`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (!res.ok) throw new Error("Gagal memuat daftar ujian");
+        const data = await res.json();
+        // Filter hanya ujian yang belum dihapus
+        setUjianList(data.filter((u) => !u.is_deleted));
+      } catch (err) {
+        console.error(err);
+        alert(err.message);
+      } finally {
+        setLoadingUjian(false);
+      }
+    };
+    fetchUjianList();
+  }, []);
+
+  // --- Handler Tambah Email ke List ---
   const handleAddEmail = () => {
     const emailToAdd = currentEmail.trim();
 
@@ -41,13 +84,28 @@ const TambahPeserta = () => {
     setCurrentEmail("");
   };
 
+  // --- Handler Hapus Email dari List ---
   const handleRemoveEmail = (indexToRemove) => {
     setEmails(emails.filter((_, index) => index !== indexToRemove));
   };
 
+  // --- Handler Kirim Undangan ---
   const handleSubmit = async (e) => {
     e.preventDefault();
 
+    if (!selectedExamId) {
+      alert("Pilih ujian yang akan diundang terlebih dahulu.");
+      return;
+    }
+
+    // Validasi Batas Login
+    const maxLoginsNum = parseInt(maxLogins, 10);
+    if (isNaN(maxLoginsNum) || maxLoginsNum <= 0) {
+      alert("Batas login minimal harus 1.");
+      return;
+    }
+
+    // Cek apakah ada email yang belum ditambahkan dari input
     const finalCurrentEmail = currentEmail.trim();
     let finalEmails = [...emails];
 
@@ -60,10 +118,8 @@ const TambahPeserta = () => {
       }
       if (!finalEmails.includes(finalCurrentEmail)) {
         finalEmails.push(finalCurrentEmail);
-        setCurrentEmail("");
-      } else {
-        setCurrentEmail("");
       }
+      setCurrentEmail("");
     }
 
     if (!pesan.trim()) {
@@ -78,10 +134,22 @@ const TambahPeserta = () => {
     setLoading(true);
 
     try {
+      // Payload yang dikirim ke backend
+      const payload = {
+        exam_id: selectedExamId,
+        pesan,
+        emails: finalEmails,
+        max_logins: maxLoginsNum,
+      };
+
+      const token = sessionStorage.getItem("adminToken");
       const response = await fetch(`${API_URL}/api/invite`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ pesan, emails: finalEmails }),
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify(payload),
       });
 
       let result = {};
@@ -91,11 +159,7 @@ const TambahPeserta = () => {
         result = JSON.parse(responseBodyText);
       } catch (jsonError) {
         console.error("Gagal parse JSON:", jsonError, responseBodyText);
-        if (response.ok && !responseBodyText) {
-          result = { message: `Undangan mungkin terkirim, tapi server tidak memberi detail.` };
-        } else {
-          throw new Error("Respons server tidak valid.");
-        }
+        throw new Error("Respons server tidak valid.");
       }
 
       if (!response.ok && response.status !== 207) {
@@ -107,9 +171,15 @@ const TambahPeserta = () => {
         throw new Error(errorMessage);
       }
 
-      alert(result.message || `Proses pengiriman selesai.`);
+      // --- PERUBAHAN DI SINI ---
+      // Mengganti alert() dengan setSuccessMessage
+      setSuccessMessage(result.message || `Proses pengiriman selesai.`);
+      setTimeout(() => setSuccessMessage(""), 7000);
+      // --- AKHIR PERUBAHAN ---
+
       setEmails([]);
       setCurrentEmail("");
+      // Trigger refresh pada daftar riwayat undangan
       setRefreshKey((prevKey) => prevKey + 1);
     } catch (error) {
       console.error("Error mengirim undangan:", error);
@@ -120,25 +190,100 @@ const TambahPeserta = () => {
   };
 
   return (
-    <div className="bg-gray-50 min-h-screen flex flex-col">
-      {/* Header - diseragamkan */}
-      <div className="bg-white shadow-sm border-b border-gray-300 px-8 py-5 sticky top-0 z-50">
+    <div className="bg-gray-50 min-h-screen flex flex-col relative">
+      {/* --- TOAST SUKSES (DITAMBAHKAN) --- */}
+      {successMessage && (
+        <div className="fixed top-20 left-1/2 -translate-x-1/2 z-[100]">
+          <div className="flex items-center gap-3 bg-green-600 text-white px-5 py-3 rounded-lg shadow-lg">
+            <FaCheckCircle className="text-white w-5 h-5" />
+            <span className="font-semibold text-base">{successMessage}</span>
+          </div>
+        </div>
+      )}
+
+      {/* Header */}
+      <div className="bg-white shadow-sm border-b border-gray-300 px-8 py-5 sticky top-0 z-50 flex justify-between items-center">
         <h2 className="text-2xl font-semibold text-gray-900 flex items-center gap-2">
           <FaPaperPlane className="text-blue-600 w-6 h-6" />
           Undang Peserta Ujian
         </h2>
+
+        {/* Tombol Pengaturan Email */}
+        <button
+          onClick={() => setShowEmailSettings(true)}
+          className="flex items-center gap-2 px-4 py-2 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 transition text-sm font-medium border border-gray-300"
+          title="Konfigurasi Email Pengirim"
+        >
+          <FaCog /> Pengaturan Email
+        </button>
       </div>
 
-      {/* Konten Utama: Layout Dua Kolom */}
+      {/* Konten Utama */}
       <div className="p-6 md:p-10 flex-1">
         <div className="flex flex-col md:flex-row gap-6 lg:gap-8 items-start max-w-6xl mx-auto">
           {/* Kolom Kiri: Form Undangan */}
           <div className="w-full md:w-7/12 lg:w-1/2">
             <div className="bg-white rounded-xl shadow-md border border-gray-200 p-6 md:p-8">
               <form onSubmit={handleSubmit} className="space-y-6">
+                {/* --- BAGIAN PENGATURAN UJIAN --- */}
+                <div className="grid grid-cols-2 gap-4">
+                  {/* Pilih Ujian */}
+                  <div className="col-span-2">
+                    <label
+                      htmlFor="ujian"
+                      className="block text-sm font-medium text-gray-700 mb-1"
+                    >
+                      <FaListUl className="inline-block mr-1 text-blue-500" />
+                      Pilih Ujian
+                    </label>
+                    <select
+                      id="ujian"
+                      value={selectedExamId}
+                      onChange={(e) => setSelectedExamId(e.target.value)}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition bg-white"
+                      required
+                      disabled={loadingUjian}
+                    >
+                      <option value="">
+                        {loadingUjian
+                          ? "Memuat daftar ujian..."
+                          : "-- Pilih Keterangan Ujian --"}
+                      </option>
+                      {ujianList.map((ujian) => (
+                        <option key={ujian.id} value={ujian.id}>
+                          {ujian.keterangan}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {/* Batas Login */}
+                  <div>
+                    <label
+                      htmlFor="max_logins"
+                      className="block text-sm font-medium text-gray-700 mb-1"
+                    >
+                      <FaKey className="inline-block mr-1 text-yellow-500" />
+                      Batas Akses Login
+                    </label>
+                    <input
+                      type="number"
+                      id="max_logins"
+                      value={maxLogins}
+                      onChange={(e) => setMaxLogins(e.target.value)}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition"
+                      min="1"
+                      required
+                    />
+                  </div>
+                </div>
+
                 {/* Textarea Pesan */}
                 <div>
-                  <label htmlFor="pesan" className="block text-sm font-medium text-gray-700 mb-1">
+                  <label
+                    htmlFor="pesan"
+                    className="block text-sm font-medium text-gray-700 mb-1"
+                  >
                     Isi Email Undangan
                   </label>
                   <textarea
@@ -154,7 +299,10 @@ const TambahPeserta = () => {
 
                 {/* Input Email Dinamis */}
                 <div>
-                  <label htmlFor="currentEmail" className="block text-sm font-medium text-gray-700 mb-1">
+                  <label
+                    htmlFor="currentEmail"
+                    className="block text-sm font-medium text-gray-700 mb-1"
+                  >
                     Email Peserta
                   </label>
 
@@ -167,7 +315,10 @@ const TambahPeserta = () => {
                             key={index}
                             className="flex justify-between items-center text-sm bg-white p-1.5 rounded border border-gray-300"
                           >
-                            <span className="text-gray-700 truncate mr-2" title={email}>
+                            <span
+                              className="text-gray-700 truncate mr-2"
+                              title={email}
+                            >
                               {email}
                             </span>
                             <button
@@ -214,16 +365,24 @@ const TambahPeserta = () => {
                       <FaPlus className="w-3 h-3" /> Tambah
                     </button>
                   </div>
-                  <p className="text-xs text-gray-500 mt-1">Tekan Enter atau klik Tambah.</p>
+                  <p className="text-xs text-gray-500 mt-1">
+                    Tekan Enter atau klik Tambah.
+                  </p>
                 </div>
 
                 {/* Tombol Kirim Undangan */}
                 <div className="pt-4">
                   <button
                     type="submit"
-                    disabled={loading || (emails.length === 0 && !currentEmail.trim())}
+                    disabled={
+                      loading ||
+                      (emails.length === 0 && !currentEmail.trim()) ||
+                      !selectedExamId
+                    }
                     className={`w-full flex justify-center items-center gap-2 px-4 py-3 rounded-md text-white font-semibold shadow transition ${
-                      loading || (emails.length === 0 && !currentEmail.trim())
+                      loading ||
+                      (emails.length === 0 && !currentEmail.trim()) ||
+                      !selectedExamId
                         ? "bg-gray-400 cursor-not-allowed"
                         : "bg-blue-600 hover:bg-blue-700"
                     }`}
@@ -235,7 +394,12 @@ const TambahPeserta = () => {
                     ) : (
                       <>
                         <FaPaperPlane /> Kirim Undangan ke{" "}
-                        {emails.length + (currentEmail.trim() && !emails.includes(currentEmail.trim()) ? 1 : 0)} Email
+                        {emails.length +
+                          (currentEmail.trim() &&
+                          !emails.includes(currentEmail.trim())
+                            ? 1
+                            : 0)}{" "}
+                        Email
                       </>
                     )}
                   </button>
@@ -252,6 +416,22 @@ const TambahPeserta = () => {
           </div>
         </div>
       </div>
+
+      {/* --- MODAL PENGATURAN EMAIL --- */}
+      {showEmailSettings && (
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+          {/* Overlay agar bisa klik di luar untuk menutup (opsional) */}
+          <div
+            className="absolute inset-0"
+            onClick={() => setShowEmailSettings(false)}
+          ></div>
+
+          {/* Konten Modal */}
+          <div className="relative w-full max-w-2xl z-10">
+            <EmailPengirim onClose={() => setShowEmailSettings(false)} />
+          </div>
+        </div>
+      )}
     </div>
   );
 };

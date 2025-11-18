@@ -1,3 +1,5 @@
+// File: src/admin/HasilAkhir.jsx (Diperbarui dengan Headers Otorisasi)
+
 import React, { useEffect, useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import {
@@ -8,15 +10,32 @@ import {
   FaTimesCircle,
   FaFileContract,
   FaPercentage,
+  FaBookOpen,
 } from "react-icons/fa";
 
 const API_URL = "http://localhost:5000";
 
+// Helper format tanggal (Tidak berubah)
+const formatTanggal = (isoString) => {
+  if (!isoString) return "-";
+  try {
+    const date = new Date(isoString);
+    return date.toLocaleString("id-ID", {
+      timeZone: "Asia/Jakarta",
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  } catch {
+    return isoString;
+  }
+};
+
 // Komponen StatCard (Tidak berubah)
 const StatCard = ({ icon, label, value, color }) => (
-  <div
-    className={`bg-white p-4 rounded-xl shadow-lg border-l-4 ${color}`}
-  >
+  <div className={`bg-white p-4 rounded-xl shadow-lg border-l-4 ${color}`}>
     <div className="flex items-center">
       <div className="p-2 rounded-full">{icon}</div>
       <div className="ml-3">
@@ -27,26 +46,21 @@ const StatCard = ({ icon, label, value, color }) => (
   </div>
 );
 
-// Komponen Modal (Popup)
+// Komponen Modal (Popup) (Tidak berubah)
 const DetailSoalModal = ({ soal, nomorSoal, onClose }) => {
   const isBenar = soal.benar;
-
-  // Cari teks jawaban yang benar dari array 'pilihan'
   const jawabanBenarObj = soal.pilihan?.find((p) => p.is_correct);
   const jawabanBenarText =
     jawabanBenarObj?.opsi_text || "Kunci jawaban tidak ditemukan";
 
   return (
-    // [PERUBAHAN]: class 'bg-black' dan 'bg-opacity-60' DIHAPUS dari div di bawah ini
     <div
-  className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-[1px]"
-  onClick={onClose}
->
-
-      {/* Konten Modal */}
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-[1px]"
+      onClick={onClose}
+    >
       <div
         className="bg-white rounded-xl shadow-2xl w-full max-w-2xl overflow-hidden"
-        onClick={(e) => e.stopPropagation()} // Mencegah modal tertutup saat klik di dalam
+        onClick={(e) => e.stopPropagation()}
       >
         {/* Header Modal */}
         <div className="p-5 border-b border-gray-200 flex justify-between items-center">
@@ -60,7 +74,6 @@ const DetailSoalModal = ({ soal, nomorSoal, onClose }) => {
             &times;
           </button>
         </div>
-
         {/* Body Modal */}
         <div className="p-6 space-y-5 max-h-[70vh] overflow-y-auto">
           {/* 1. Soal */}
@@ -72,36 +85,31 @@ const DetailSoalModal = ({ soal, nomorSoal, onClose }) => {
               {soal.soal_text}
             </p>
           </div>
-
           {/* 2. Jawaban Peserta */}
           <div>
             <label className="block text-sm font-semibold text-gray-600 mb-1">
               Jawaban Peserta:
             </label>
             <div
-              className={`border rounded-lg p-4 ${
-                isBenar
+              className={`border rounded-lg p-4 ${isBenar
                   ? "bg-green-50 border-green-300"
                   : "bg-red-50 border-red-300"
-              }`}
+                }`}
             >
               <p
-                className={`text-lg font-medium ${
-                  isBenar ? "text-green-800" : "text-red-800"
-                }`}
+                className={`text-lg font-medium ${isBenar ? "text-green-800" : "text-red-800"
+                  }`}
               >
                 {soal.jawaban_text || "(Tidak dijawab)"}
               </p>
               <p
-                className={`text-sm font-semibold mt-1 ${
-                  isBenar ? "text-green-600" : "text-red-600"
-                }`}
+                className={`text-sm font-semibold mt-1 ${isBenar ? "text-green-600" : "text-red-600"
+                  }`}
               >
                 {isBenar ? "BENAR" : "SALAH"}
               </p>
             </div>
           </div>
-
           {/* 3. Jawaban Benar (Hanya tampil jika peserta salah) */}
           {!isBenar && (
             <div>
@@ -115,61 +123,58 @@ const DetailSoalModal = ({ soal, nomorSoal, onClose }) => {
               </div>
             </div>
           )}
-
           {/* 4. Daftar Semua Pilihan Ganda */}
-          <div>
-            <label className="block text-sm font-semibold text-gray-600 mb-1">
-              Semua Pilihan:
-            </label>
-            <div className="space-y-2">
-              {soal.pilihan?.map((pil, idx) => {
-                const isJawabanBenar = pil.is_correct;
-                const isJawabanPeserta =
-                  pil.opsi_text === soal.jawaban_text;
-                const labelHuruf = String.fromCharCode("A".charCodeAt(0) + idx);
+          {soal.tipe_soal === "pilihanGanda" && (
+            <div>
+              <label className="block text-sm font-semibold text-gray-600 mb-1">
+                Semua Pilihan:
+              </label>
+              <div className="space-y-2">
+                {soal.pilihan?.map((pil, idx) => {
+                  const isJawabanBenar = pil.is_correct;
+                  const isJawabanPeserta =
+                    pil.opsi_text === soal.jawaban_text;
+                  const labelHuruf = String.fromCharCode("A".charCodeAt(0) + idx);
 
-                return (
-                  <div
-                    key={pil.id}
-                    className={`border rounded-lg p-3 flex items-start gap-3
-                      ${
-                        isJawabanBenar
+                  return (
+                    <div
+                      key={pil.id}
+                      className={`border rounded-lg p-3 flex items-start gap-3
+                      ${isJawabanBenar
                           ? "border-green-500 bg-green-50 shadow-sm"
                           : "border-gray-200"
-                      }
-                      ${
-                        isJawabanPeserta && !isJawabanBenar
+                        }
+                      ${isJawabanPeserta && !isJawabanBenar
                           ? "border-red-500 bg-red-50"
                           : ""
-                      }
+                        }
                     `}
-                  >
-                    <span className="font-semibold text-gray-700">
-                      {labelHuruf}.
-                    </span>
-                    <span className="flex-1 text-gray-800">
-                      {pil.opsi_text}
-                    </span>
-                    {/* Ikon Tanda */}
-                    {isJawabanBenar && (
-                      <FaCheckCircle
-                        className="text-green-600 mt-1 flex-shrink-0"
-                        title="Jawaban Benar"
-                      />
-                    )}
-                    {isJawabanPeserta && !isJawabanBenar && (
-                      <FaTimesCircle
-                        className="text-red-600 mt-1 flex-shrink-0"
-                        title="Pilihan Peserta"
-                      />
-                    )}
-                  </div>
-                );
-              })}
+                    >
+                      <span className="font-semibold text-gray-700">
+                        {labelHuruf}.
+                      </span>
+                      <span className="flex-1 text-gray-800">
+                        {pil.opsi_text}
+                      </span>
+                      {isJawabanBenar && (
+                        <FaCheckCircle
+                          className="text-green-600 mt-1 flex-shrink-0"
+                          title="Jawaban Benar"
+                        />
+                      )}
+                      {isJawabanPeserta && !isJawabanBenar && (
+                        <FaTimesCircle
+                          className="text-red-600 mt-1 flex-shrink-0"
+                          title="Pilihan Peserta"
+                        />
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
             </div>
-          </div>
+          )}
         </div>
-
         {/* Footer Modal */}
         <div className="p-4 bg-gray-50 border-t border-gray-200 text-right">
           <button
@@ -184,7 +189,7 @@ const DetailSoalModal = ({ soal, nomorSoal, onClose }) => {
   );
 };
 
-// Komponen HasilAkhir (Tidak ada perubahan di sini)
+// Komponen HasilAkhir
 const HasilAkhir = () => {
   const { id: pesertaId } = useParams();
   const [peserta, setPeserta] = useState(null);
@@ -196,6 +201,9 @@ const HasilAkhir = () => {
   const [selectedSoal, setSelectedSoal] = useState(null);
   const [selectedNomor, setSelectedNomor] = useState(0);
 
+  const [submittedAt, setSubmittedAt] = useState(null);
+  const [keteranganUjian, setKeteranganUjian] = useState(null);
+
   useEffect(() => {
     if (!pesertaId) return;
 
@@ -204,18 +212,34 @@ const HasilAkhir = () => {
         setLoading(true);
         setError("");
 
-        const resPeserta = await fetch(`${API_URL}/api/peserta/${pesertaId}`);
+        const token = sessionStorage.getItem("adminToken");
+        if (!token) throw new Error("Token tidak ditemukan.");
+
+        const headers = { Authorization: `Bearer ${token}` };
+
+        const resPeserta = await fetch(`${API_URL}/api/peserta/${pesertaId}`, { headers });
+
         const dataPeserta = await resPeserta.json();
         if (!resPeserta.ok) throw new Error(dataPeserta.message);
         setPeserta(dataPeserta);
 
+        // ▼▼▼ PERUBAHAN: Tambahkan 'headers' ke fetch hasil ▼▼▼
+        // Ambil hasil ujian (Dilindungi, perlu token)
         const resHasil = await fetch(
-          `${API_URL}/api/hasil/peserta/${pesertaId}`
+          `${API_URL}/api/hasil/peserta/${pesertaId}`,
+          { headers } // <-- Tambahkan headers di sini
         );
+        // ▲▲▲ AKHIR PERUBAHAN ▲▲▲
+
         const dataHasil = await resHasil.json();
         if (!resHasil.ok) throw new Error(dataHasil.message);
 
         setHasil(dataHasil);
+
+        if (dataHasil.length > 0) {
+          setSubmittedAt(dataHasil[0].created_at);
+          setKeteranganUjian(dataHasil[0].keterangan_ujian);
+        }
       } catch (err) {
         console.error(err);
         setError(err.message || "Gagal memuat data detail");
@@ -227,70 +251,53 @@ const HasilAkhir = () => {
     fetchDetail();
   }, [pesertaId]);
 
-  // Pisahkan jawaban PG dan Esai
-  const pgAnswers = hasil.filter((h) => h.tipe_soal === "pilihanGanda");
+  // Kalkulasi skor (Tidak berubah)
+  const pgAnswers = hasil.filter(
+    (h) => h.tipe_soal === "pilihanGanda" || h.tipe_soal === "teksSingkat"
+  );
   const esayAnswers = hasil.filter((h) => h.tipe_soal === "esay");
-
-  // Hitung Skor
   const totalPg = pgAnswers.length;
   const totalBenar = pgAnswers.filter((j) => j.benar).length;
   const totalSalah = totalPg - totalBenar;
   const totalEsai = esayAnswers.length;
   const skorPg = totalPg > 0 ? ((totalBenar / totalPg) * 100).toFixed(0) : 0;
 
-  // Handler untuk membuka dan menutup modal
+  // Handler modal (Tidak berubah)
   const handleBukaModal = (jawaban, nomor) => {
     setSelectedSoal(jawaban);
     setSelectedNomor(nomor);
     setIsModalOpen(true);
   };
-
   const handleTutupModal = () => {
     setIsModalOpen(false);
     setSelectedSoal(null);
     setSelectedNomor(0);
   };
 
-  // Tampilan Loading & Error
+  // --- RENDER ---
   if (loading) {
     return (
-      <div className="bg-gray-50 min-h-screen flex flex-col">
-        <div className="bg-white shadow-md border-b border-gray-300 px-8 py-4 flex justify-between items-center sticky top-0 z-50">
-          <h2 className="text-xl font-semibold text-gray-900 flex items-center gap-2">
-            <FaSyncAlt className="text-blue-600 text-lg animate-spin" />
-            Memuat Detail...
-          </h2>
-        </div>
-        <div className="p-10 flex justify-center items-center text-gray-600">
-          <span className="text-lg">Memuat data detail...</span>
-        </div>
+      <div className="flex justify-center items-center h-64 text-gray-500">
+        <FaSyncAlt className="animate-spin mr-2" /> Memuat data...
       </div>
     );
   }
-
   if (error || !peserta) {
     return (
-      <div className="bg-gray-50 min-h-screen flex flex-col">
-        <div className="bg-white shadow-md border-b border-gray-300 px-8 py-4 flex justify-between items-center sticky top-0 z-50">
-          <h2 className="text-xl font-semibold text-gray-900 flex items-center gap-2">
-            <FaExclamationCircle className="text-red-600 text-lg" />
-            Error
-          </h2>
-          <Link
-            to="/admin/hasil-ujian"
-            className="flex items-center gap-2 px-3 py-2 bg-gray-200 text-gray-700 rounded-md hover:bg-gray-300 transition"
-          >
-            &larr; Kembali
-          </Link>
-        </div>
-        <div className="p-10 text-center text-red-600">
-          {error || "Data peserta tidak ditemukan."}
-        </div>
+      <div className="flex flex-col items-center justify-center h-64 text-red-500">
+        <FaExclamationCircle className="text-4xl mb-3" />
+        <span className="text-lg">Error: {error || "Peserta tidak ditemukan"}</span>
+        <Link
+          to="/admin/hasil-ujian"
+          className="mt-4 text-sm text-blue-600 hover:underline"
+        >
+          &larr; Kembali ke Rekap Hasil
+        </Link>
       </div>
     );
   }
 
-  // Tampilan Utama (Sukses)
+  // Tampilan Utama (Sukses) (Tidak berubah)
   return (
     <div className="bg-gray-50 min-h-screen flex flex-col">
       {/* HEADER */}
@@ -310,6 +317,7 @@ const HasilAkhir = () => {
       {/* KONTEN (Area) */}
       <div className="p-6 md:p-8">
         <div className="p-6 md:p-8 max-w-4xl mx-auto bg-white shadow-xl rounded-xl border border-gray-200">
+
           {/* Bagian 0: Ringkasan Skor */}
           <div className="mb-10">
             <h2 className="text-2xl font-semibold text-gray-800 mb-4 pb-2 border-b border-gray-200">
@@ -318,19 +326,19 @@ const HasilAkhir = () => {
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
               <StatCard
                 icon={<FaCheckCircle className="text-green-500 text-2xl" />}
-                label="PG Benar"
+                label="Skor Benar (Auto)"
                 value={`${totalBenar} / ${totalPg}`}
                 color="border-green-500"
               />
               <StatCard
                 icon={<FaPercentage className="text-blue-500 text-2xl" />}
-                label="Skor PG"
+                label="Skor Nilai (Auto)"
                 value={`${skorPg}%`}
                 color="border-blue-500"
               />
               <StatCard
                 icon={<FaTimesCircle className="text-red-500 text-2xl" />}
-                label="PG Salah"
+                label="Skor Salah (Auto)"
                 value={totalSalah}
                 color="border-red-500"
               />
@@ -343,31 +351,43 @@ const HasilAkhir = () => {
             </div>
           </div>
 
-          {/* Bagian 1: Data Peserta */}
+          {/* Bagian 1: Data Diri */}
           <div className="mb-10">
             <h2 className="text-2xl font-semibold text-gray-800 mb-4 pb-2 border-b border-gray-200">
-              📋 Data Diri Peserta
+              📋 Data Ujian & Peserta
             </h2>
-            <div className="bg-gray-50 rounded-lg border border-gray-200 p-4 grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-2 text-sm text-gray-700">
-              <DetailItem label="Nama" value={peserta.nama} />
-              <DetailItem label="Tempat & Tgl Lahir" value={peserta.ttl} />
-              <DetailItem label="Nomor HP" value={peserta.nohp} />
-              <DetailItem label="Email" value={peserta.email} />
-              <DetailItem label="Jenis Kelamin" value={peserta.jenis_kelamin} />
-              <DetailItem
-                label="Akun Media Sosial"
-                value={peserta.sosmed || "-"}
-              />
+            <div className="bg-gray-50 rounded-lg border border-gray-200 p-4 grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-3 text-sm text-gray-700">
+
               <div className="md:col-span-2">
-                <DetailItem label="Alamat" value={peserta.alamat} />
+                <DetailItem
+                  label="Nama Ujian"
+                  value={keteranganUjian}
+                  icon={<FaBookOpen className="inline-block mr-1 text-blue-500" />}
+                />
+              </div>
+
+              <div className="md:col-span-2">
+                <DetailItem label="Nama Peserta" value={peserta.nama} />
+              </div>
+              <div>
+                <DetailItem label="Nomor HP" value={peserta.nohp} />
+              </div>
+              <div>
+                <DetailItem label="Email" value={peserta.email} />
+              </div>
+              <div className="md:col-span-2">
+                <DetailItem
+                  label="Waktu Submit"
+                  value={formatTanggal(submittedAt)}
+                />
               </div>
             </div>
           </div>
 
-          {/* === Bagian 2: Status Pilihan Ganda === */}
+          {/* Bagian 2: Status Jawaban (Auto-Nilai) */}
           <div className="mb-10">
             <h2 className="text-2xl font-semibold text-gray-800 mb-4 pb-2 border-b border-gray-200">
-              📝 Status Jawaban Pilihan Ganda
+              📝 Status Jawaban (Auto-Nilai)
             </h2>
             <div className="flex flex-wrap gap-2">
               {pgAnswers.length > 0 ? (
@@ -376,10 +396,9 @@ const HasilAkhir = () => {
                     key={jawaban.question_id}
                     onClick={() => handleBukaModal(jawaban, idx + 1)}
                     className={`w-10 h-10 flex items-center justify-center rounded-lg font-bold text-sm shadow-sm transition-all hover:shadow-lg hover:scale-110 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-opacity-50
-                      ${
-                        jawaban.benar
-                          ? "bg-green-100 text-green-700 border border-green-300"
-                          : "bg-red-100 text-red-700 border border-red-300"
+                      ${jawaban.benar
+                        ? "bg-green-100 text-green-700 border border-green-300"
+                        : "bg-red-100 text-red-700 border border-red-300"
                       }`}
                     title={`Klik untuk melihat detail soal #${idx + 1}`}
                   >
@@ -388,7 +407,7 @@ const HasilAkhir = () => {
                 ))
               ) : (
                 <p className="text-sm text-gray-500">
-                  Tidak ada jawaban pilihan ganda.
+                  Tidak ada jawaban (auto-nilai).
                 </p>
               )}
             </div>
@@ -429,11 +448,9 @@ const HasilAkhir = () => {
               )}
             </div>
           </div>
-        </div>{" "}
-        {/* End card */}
-      </div>{" "}
-      {/* End content padding */}
-      
+        </div>
+      </div>
+
       {/* Render Modal */}
       {isModalOpen && (
         <DetailSoalModal
@@ -442,14 +459,17 @@ const HasilAkhir = () => {
           onClose={handleTutupModal}
         />
       )}
-    </div> // End full page wrapper
+    </div>
   );
 };
 
-// Komponen helper
-const DetailItem = ({ label, value }) => (
+// Komponen helper DetailItem
+const DetailItem = ({ label, value, icon }) => (
   <div>
-    <span className="block text-xs font-medium text-gray-500">{label}</span>
+    <span className="block text-xs font-medium text-gray-500">
+      {icon}
+      {label}
+    </span>
     <span className="block text-gray-900 font-medium">{value || "-"}</span>
   </div>
 );

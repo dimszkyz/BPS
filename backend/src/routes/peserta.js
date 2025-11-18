@@ -1,53 +1,29 @@
 // ============================
-// FILE: backend/src/routes/peserta.js
+// FILE: backend/src/routes/peserta.js (VERSI BERSIH)
 // ============================
 
 const express = require("express");
 const router = express.Router();
 const pool = require("../db");
+const verifyAdmin = require("../middleware/verifyAdmin");
 
 // ============================
 // POST - Simpan Data Peserta
 // ============================
 router.post("/", async (req, res) => {
   try {
-    const { nama, ttl, nohp, email, jenisKelamin, alamat, sosmed } = req.body;
+    // Hanya terima nama, nohp, email
+    const { nama, nohp, email } = req.body;
 
     // Validasi minimal
-    if (!nama || !ttl || !nohp || !email || !jenisKelamin || !alamat) {
-      return res.status(400).json({ message: "Semua field wajib diisi!" });
+    if (!nama || !nohp || !email) {
+      return res.status(400).json({ message: "Nama, Nomor HP, dan Email wajib diisi!" });
     }
 
-    // =======================================================
-    // PERBAIKAN: Blok ini dikomentari agar *selalu* membuat peserta baru.
-    // Ini adalah penyebab bug di mana email yang sama akan
-    // mengembalikan ID peserta lama.
-    // =======================================================
-    /*
-    // Cek apakah peserta dengan email yang sama sudah ada (opsional)
-    const [existing] = await pool.execute(
-      "SELECT id FROM peserta WHERE email = ? LIMIT 1",
-      [email]
-    );
-    if (existing.length > 0) {
-      return res
-        .status(200)
-        .json({
-          id: existing[0].id,
-          message: "Peserta sudah terdaftar, data lama digunakan ✅",
-        });
-    }
-    */
-    // =======================================================
-    // AKHIR PERBAIKAN
-    // =======================================================
-
-    // Simpan data baru
+    // Simpan data baru (hanya 3 kolom)
     const [result] = await pool.execute(
-      `INSERT INTO peserta 
-        (nama, ttl, nohp, email, jenis_kelamin, alamat, sosmed)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      [nama, ttl, nohp, email, jenisKelamin, alamat, sosmed || null]
+      `INSERT INTO peserta (nama, nohp, email) VALUES (?, ?, ?)`,
+      [nama, nohp, email]
     );
 
     // Kirim ID peserta baru
@@ -65,48 +41,45 @@ router.post("/", async (req, res) => {
 });
 
 // ============================
-// PUT - Update Data Peserta berdasarkan ID
-// (Tidak ada perubahan di sini)
+// PUT - Update Data Peserta berdasarkan ID (Peserta bisa update sendiri)
 // ============================
 router.put("/:id", async (req, res) => {
   try {
     const { id } = req.params;
-    const { nama, ttl, nohp, email, jenisKelamin, alamat, sosmed } = req.body;
+    const { nama, nohp, email } = req.body;
 
-    // Validasi minimal
-    if (!nama || !ttl || !nohp || !email || !jenisKelamin || !alamat) {
-      return res.status(400).json({ message: "Semua field wajib diisi!" });
+    if (!nama || !nohp || !email) {
+      return res.status(400).json({ message: "Nama, Nomor HP, dan Email wajib diisi!" });
     }
 
-    // Perbarui data peserta berdasarkan ID
     const [result] = await pool.execute(
-      `UPDATE peserta SET nama = ?, ttl = ?, nohp = ?, email = ?, jenis_kelamin = ?, alamat = ?, sosmed = ? 
-       WHERE id = ?`,
-      [nama, ttl, nohp, email, jenisKelamin, alamat, sosmed || null, id]
+      `UPDATE peserta SET nama = ?, nohp = ?, email = ? WHERE id = ?`,
+      [nama, nohp, email, id]
     );
 
     if (result.affectedRows === 0) {
       return res.status(404).json({ message: "Peserta tidak ditemukan" });
     }
-
-    res.status(200).json({
-      message: "Peserta berhasil diperbarui ✅",
+    return res.status(200).json({ 
+        id: parseInt(id, 10), 
+        message: "Peserta berhasil diperbarui ✅" 
     });
   } catch (err) {
     console.error("Error saat memperbarui peserta:", err);
-    res.status(500).json({
-      message: "Gagal memperbarui data peserta.",
-      error: err.message,
-    });
+    return res.status(500).json({ message: "Gagal memperbarui data peserta.", error: err.message });
   }
 });
 
+
 // ============================
 // GET - Ambil Semua Data Peserta
-// (Tidak ada perubahan di sini)
 // ============================
-router.get("/", async (req, res) => {
+router.get("/", verifyAdmin, async (req, res) => { // <-- 1. Tambah verifyAdmin
   try {
+   // ▼▼▼ PERUBAHAN DI SINI ▼▼▼
+   if (req.admin.role !== 'superadmin') {
+     return res.status(403).json({ message: "Hanya Superadmin yang dapat melihat semua peserta." });
+   }
     const [rows] = await pool.execute(
       "SELECT * FROM peserta ORDER BY created_at DESC"
     );
@@ -119,9 +92,8 @@ router.get("/", async (req, res) => {
 
 // ============================
 // GET - Ambil Data Peserta berdasarkan ID
-// (Tidak ada perubahan di sini)
 // ============================
-router.get("/:id", async (req, res) => {
+router.get("/:id", verifyAdmin, async (req, res) => {
   try {
     const { id } = req.params;
     const [rows] = await pool.execute(
@@ -142,11 +114,13 @@ router.get("/:id", async (req, res) => {
 
 // ============================
 // DELETE - Hapus Peserta berdasarkan ID
-// (Tidak ada perubahan di sini)
 // ============================
-
-router.delete("/:id", async (req, res) => {
+router.delete("/:id", verifyAdmin, async (req, res) => { // <-- 1. Tambah verifyAdmin
   try {
+   // ▼▼▼ PERUBAHAN DI SINI ▼▼▼
+   if (req.admin.role !== 'superadmin') {
+     return res.status(403).json({ message: "Hanya Superadmin yang dapat menghapus peserta." });
+   }
     const { id } = req.params;
 
     if (!id)
@@ -156,11 +130,7 @@ router.delete("/:id", async (req, res) => {
       id,
     ]);
 
-    // Log hasil dari DELETE query
-    console.log("Hasil DELETE:", result);
-
     if (result.affectedRows === 0) {
-      console.log("Peserta dengan ID:", id, "tidak ditemukan");
       return res.status(404).json({ message: "Peserta tidak ditemukan" });
     }
 
@@ -173,6 +143,5 @@ router.delete("/:id", async (req, res) => {
     });
   }
 });
-
 
 module.exports = router;

@@ -1,4 +1,4 @@
-// src/routes/ujian.js
+const verifyAdmin = require("../middleware/verifyAdmin");
 const express = require("express");
 const router = express.Router();
 const pool = require("../db");
@@ -6,11 +6,6 @@ const multer = require("multer");
 const path = require("path");
 const fs = require("fs");
 
-// ====================
-// KONFIGURASI UPLOAD GAMBAR
-// ====================
-
-// Pastikan folder uploads tersedia
 const uploadDir = path.join(__dirname, "../uploads");
 if (!fs.existsSync(uploadDir)) {
   fs.mkdirSync(uploadDir, { recursive: true });
@@ -27,12 +22,10 @@ const storage = multer.diskStorage({
 const upload = multer({ storage });
 
 // Serve file gambar statis agar bisa diakses frontend
-// Catatan: path ini akan tersedia di /api/ujian/uploads jika router ini dimount di /api/ujian
 router.use("/uploads", express.static(uploadDir));
 
 // Helper untuk parsing body fleksibel (multipart/form-data atau JSON)
 function parseBodyData(req) {
-  // Jika front-end mengirim { data: "<json-string>" }
   if (req.body && typeof req.body.data === "string") {
     try {
       return JSON.parse(req.body.data);
@@ -40,7 +33,6 @@ function parseBodyData(req) {
       return {};
     }
   }
-  // Jika front-end langsung mengirim object JSON (perlu express.json() di app utama)
   if (req.body && typeof req.body === "object") {
     return req.body.data && typeof req.body.data === "object"
       ? req.body.data
@@ -49,48 +41,70 @@ function parseBodyData(req) {
   return {};
 }
 
-// Normalisasi boolean dari berbagai bentuk input ("true", "1", true, "on")
+// Normalisasi boolean
 function toBool(v) {
   return v === true || v === 1 || v === "1" || v === "true" || v === "on";
 }
 
 // ====================
-// POST - Simpan ujian baru (dengan gambar opsional)
-// - Bisa menerima file upload (gambar_i) ATAU path gambar lama via s.gambar
-// - Tambahan: dukung kolom exams.acak_soal
+// POST - Simpan ujian baru
 // ====================
-router.post("/", upload.any(), async (req, res) => {
+router.post("/", verifyAdmin, upload.any(), async (req, res) => {
   const bodyData = parseBodyData(req);
-  const { keterangan, tanggal, jamMulai, jamBerakhir, soalList, acakSoal } = bodyData;
+  const {
+    keterangan,
+    tanggal,
+    tanggalBerakhir,
+    jamMulai,
+    jamBerakhir,
+    durasi,
+    soalList,
+    acakSoal,
+  } = bodyData;
 
-  // Validasi input
-  if (!keterangan || !tanggal || !jamMulai || !jamBerakhir || !Array.isArray(soalList)) {
-    return res.status(400).json({ message: "Payload tidak valid." });
+  if (
+    !keterangan ||
+    !tanggal ||
+    !tanggalBerakhir ||
+    !jamMulai ||
+    !jamBerakhir ||
+    !durasi ||
+    !Array.isArray(soalList)
+  ) {
+    return res
+      .status(400)
+      .json({ message: "Payload tidak valid. Pastikan durasi terisi." });
   }
+
+ const loggedInAdminId = req.admin.id;
 
   let conn;
   try {
     conn = await pool.getConnection();
     await conn.beginTransaction();
 
-    // Simpan data ujian utama (termasuk acak_soal)
     const [examResult] = await conn.execute(
-      "INSERT INTO exams (keterangan, tanggal, jam_mulai, jam_berakhir, acak_soal) VALUES (?, ?, ?, ?, ?)",
-      [keterangan, tanggal, jamMulai, jamBerakhir, toBool(acakSoal) ? 1 : 0]
+      "INSERT INTO exams (keterangan, tanggal, tanggal_berakhir, jam_mulai, jam_berakhir, acak_soal, durasi, admin_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+      [
+        keterangan,
+        tanggal,
+        tanggalBerakhir,
+        jamMulai,
+        jamBerakhir,
+        toBool(acakSoal) ? 1 : 0,
+        parseInt(durasi, 10) || 0,
+        loggedInAdminId
+      ]
     );
     const examId = examResult.insertId;
 
-    // Simpan setiap soal beserta gambar (jika ada)
     for (let i = 0; i < soalList.length; i++) {
       const s = soalList[i] || {};
       const file = req.files?.find((f) => f.fieldname === `gambar_${i}`);
-
-      // Jika tidak ada file baru, pakai path gambar lama dari body (jika ada)
       const gambarFromBody =
         s && typeof s.gambar === "string" && s.gambar.trim() !== ""
           ? s.gambar.trim()
           : null;
-
       const gambarPath = file ? `/uploads/${file.filename}` : gambarFromBody;
 
       const [qRes] = await conn.execute(
@@ -99,7 +113,6 @@ router.post("/", upload.any(), async (req, res) => {
       );
       const qId = qRes.insertId;
 
-      // Simpan pilihan jika soal pilihan ganda
       if (s.tipeSoal === "pilihanGanda" && Array.isArray(s.pilihan)) {
         const kunci = (s.kunciJawabanText || "").trim();
         const correctIndex = s.pilihan.findIndex((t) => {
@@ -117,6 +130,11 @@ router.post("/", upload.any(), async (req, res) => {
             [qId, teks, j === correctIndex]
           );
         }
+      } else if (s.tipeSoal === "teksSingkat" && s.kunciJawabanText) {
+        await conn.execute(
+          "INSERT INTO options (question_id, opsi_text, is_correct) VALUES (?, ?, ?)",
+          [qId, s.kunciJawabanText, 1]
+        );
       }
     }
 
@@ -140,11 +158,18 @@ router.post("/", upload.any(), async (req, res) => {
 // ====================
 // GET - List semua ujian
 // ====================
-router.get("/", async (req, res) => {
+router.get("/", verifyAdmin, async (req, res) => {
   try {
-    const [rows] = await pool.execute(
-      "SELECT * FROM exams WHERE is_deleted = 0 ORDER BY created_at ASC"
-    );
+    const { id: loggedInAdminId } = req.admin;
+
+    const query = `
+      SELECT * FROM exams
+      WHERE is_deleted = 0
+      AND admin_id = ?
+      ORDER BY created_at ASC
+    `;
+
+    const [rows] = await pool.execute(query, [loggedInAdminId]);
     res.json(rows);
   } catch (err) {
     console.error(err);
@@ -152,79 +177,179 @@ router.get("/", async (req, res) => {
   }
 });
 
+
 // ====================
-// GET - Ambil ujian AKTIF berdasarkan tanggal
+// GET - Ambil ujian AKTIF berdasarkan tanggal (Legacy, mungkin tidak terpakai lagi tapi biarkan)
 // ====================
 router.get("/tanggal/:tgl", async (req, res) => {
   try {
     const { tgl } = req.params;
-
-    // Ambil semua ujian di tanggal tsb (yang belum dihapus/diarsip)
     const [rows] = await pool.execute(
-      "SELECT * FROM exams WHERE is_deleted = 0 AND DATE(tanggal) = ?",
+      "SELECT * FROM exams WHERE is_deleted = 0 AND ? BETWEEN DATE(tanggal) AND DATE(tanggal_berakhir)",
       [tgl]
     );
 
     if (rows.length === 0) {
       return res.status(404).json({ message: "Tidak ada ujian di tanggal ini" });
     }
+    // ... (Logika legacy disederhanakan, fokus ke check-active/:id)
+    return res.json(rows[0]);
+  } catch (err) {
+    res.status(500).json({ message: "Gagal mengambil ujian" });
+  }
+});
 
-    const padTime = (t) => (t?.length === 5 ? `${t}:00` : (t || "00:00:00"));
-    const nowMs = Date.now();
+// =======================================================
+// GET - Cek Ujian AKTIF (LOGIKA HARIAN DIPERKETAT)
+// =======================================================
+router.get("/check-active/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const [rows] = await pool.execute(
+      "SELECT * FROM exams WHERE is_deleted = 0 AND id = ?",
+      [id]
+    );
 
-    // Hitung window waktu setiap ujian
-    const enriched = rows.map((ex) => {
-      const start = new Date(`${tgl}T${padTime(ex.jam_mulai)}`);
-      let end = new Date(`${tgl}T${padTime(ex.jam_berakhir)}`);
-      // Jika jam_berakhir <= jam_mulai, berarti melewati tengah malam → tambah 1 hari
-      if (end <= start) end = new Date(end.getTime() + 24 * 60 * 60 * 1000);
-
-      return {
-        exam: ex,
-        startMs: start.getTime(),
-        endMs: end.getTime(),
-      };
-    });
-
-    // Pilih ujian yang sedang aktif saat ini
-    const aktif = enriched
-      .filter((e) => nowMs >= e.startMs && nowMs <= e.endMs)
-      .sort((a, b) => b.startMs - a.startMs)[0]; // jika overlap, pilih yang start terbaru
-
-    if (aktif) {
-      return res.json(aktif.exam);
+    if (rows.length === 0) {
+      return res
+        .status(404)
+        .json({ message: "Ujian dengan ID ini tidak ditemukan." });
     }
 
-    // Tidak ada yang aktif persis sekarang
-    return res.status(404).json({
-      message: "Belum ada ujian aktif saat ini untuk tanggal tersebut.",
+    const ujian = rows[0];
+
+    // --- 1. Dapatkan Waktu Sekarang (WIB) yang PASTI ---
+    // Gunakan Intl.DateTimeFormat untuk memaksa zona waktu Asia/Jakarta
+    // terlepas dari setting server.
+    const now = new Date();
+    const wibDateFormatter = new Intl.DateTimeFormat("en-CA", {
+      timeZone: "Asia/Jakarta", // Paksa WIB
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
     });
+    const wibTimeFormatter = new Intl.DateTimeFormat("en-GB", {
+      timeZone: "Asia/Jakarta", // Paksa WIB
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hour12: false,
+    });
+
+    const nowWIB_Date = wibDateFormatter.format(now); // Format: "YYYY-MM-DD"
+    const nowWIB_Time = wibTimeFormatter.format(now); // Format: "HH:mm:ss"
+
+    console.log("--- DEBUG WAKTU (WIB) ---");
+    console.log("Current Date (WIB):", nowWIB_Date);
+    console.log("Current Time (WIB):", nowWIB_Time);
+
+    // --- 2. Ambil Jadwal dari DB ---
+    // Pastikan format tanggal DB juga YYYY-MM-DD
+    const startDate = new Date(ujian.tanggal).toLocaleDateString("en-CA");
+    const endDate = new Date(ujian.tanggal_berakhir).toLocaleDateString(
+      "en-CA"
+    );
+    const startTime = ujian.jam_mulai; // Format DB biasanya sudah "HH:mm:ss"
+    const endTime = ujian.jam_berakhir;
+
+    console.log("Exam Date Range:", startDate, "s/d", endDate);
+    console.log("Exam Time Window (Daily):", startTime, "-", endTime);
+
+    // --- 3. Cek Apakah HARI INI masuk dalam rentang tanggal ---
+    // String comparison YYYY-MM-DD aman untuk tanggal
+    if (nowWIB_Date < startDate) {
+      return res.status(403).json({
+        message: `Ujian belum dimulai. Tanggal mulai: ${startDate}`,
+      });
+    }
+    if (nowWIB_Date > endDate) {
+      return res.status(403).json({
+        message: `Periode ujian sudah berakhir pada tanggal ${endDate}`,
+      });
+    }
+
+    // --- 4. Cek Apakah JAM SEKARANG masuk dalam jendela waktu HARIAN ---
+    // String comparison HH:mm:ss juga aman untuk waktu 24 jam
+    if (nowWIB_Time < startTime) {
+      return res.status(403).json({
+        message: `Ujian hari ini belum dibuka. Jam akses: ${startTime} - ${endTime} WIB`,
+      });
+    }
+    if (nowWIB_Time > endTime) {
+      return res.status(403).json({
+        message: `Jam akses ujian hari ini sudah ditutup (${endTime} WIB).`,
+      });
+    }
+
+    // Jika lolos semua cek, berarti ujian AKTIF
+    return res.json(ujian);
   } catch (err) {
-    console.error("Error GET /tanggal/:tgl:", err);
-    res.status(500).json({ message: "Gagal mengambil ujian berdasarkan tanggal" });
+    console.error("Error GET /check-active/:id:", err);
+    res.status(500).json({ message: "Gagal memverifikasi status ujian." });
+  }
+});
+// ====================
+// GET - Detail ujian publik (tanpa verifyAdmin)
+// ====================
+router.get("/public/:id", async (req, res) => {
+  const { id } = req.params;
+  try {
+    // Ambil ujian
+    const [ujianRows] = await pool.execute(
+      "SELECT * FROM exams WHERE id = ? AND is_deleted = 0",
+      [id]
+    );
+    if (ujianRows.length === 0) {
+      return res.status(404).json({ message: "Ujian tidak ditemukan." });
+    }
+
+    const ujian = ujianRows[0];
+
+    // Ambil semua soal dan opsinya
+    const [soalRows] = await pool.execute(
+      "SELECT id, tipe_soal AS tipeSoal, soal_text AS soalText, gambar FROM questions WHERE exam_id = ?",
+      [id]
+    );
+
+    for (let s of soalRows) {
+      const [opsiRows] = await pool.execute(
+        "SELECT id, opsi_text AS text, is_correct AS isCorrect FROM options WHERE question_id = ?",
+        [s.id]
+      );
+      s.pilihan = opsiRows;
+    }
+
+    return res.json({ ...ujian, soalList: soalRows });
+  } catch (err) {
+    console.error("Error GET /api/ujian/public/:id:", err);
+    res.status(500).json({ message: "Gagal mengambil data ujian publik." });
   }
 });
 
 // ====================
 // GET - Detail ujian berdasarkan ID
 // ====================
-router.get("/:id", async (req, res) => {
+router.get("/:id", verifyAdmin, async (req, res) => { // <-- TAMBAH verifyAdmin
   const { id } = req.params;
   try {
-    // Ambil ujian utama
-    const [ujianRows] = await pool.execute("SELECT * FROM exams WHERE id = ?", [id]);
+    // ▼▼▼ TAMBAHKAN BLOK INI ▼▼▼
+    const isOwner = await checkOwnership(req.admin, id);
+    if (!isOwner) {
+      return res.status(403).json({ message: "Akses ditolak. Anda bukan pemilik ujian ini." });
+    }
+    // ▲▲▲ AKHIR BLOK TAMBAHAN ▲▲▲
+
+    const [ujianRows] = await pool.execute("SELECT * FROM exams WHERE id = ?", [
+      id,
+    ]);
     if (ujianRows.length === 0) {
       return res.status(404).json({ message: "Ujian tidak ditemukan" });
     }
     const ujian = ujianRows[0];
-
-    // Ambil semua soal
     const [soalRows] = await pool.execute(
       "SELECT * FROM questions WHERE exam_id = ?",
       [id]
     );
-
-    // Ambil pilihan untuk tiap soal
     for (const soal of soalRows) {
       const [pilihanRows] = await pool.execute(
         "SELECT id, opsi_text AS text, is_correct FROM options WHERE question_id = ?",
@@ -232,22 +357,22 @@ router.get("/:id", async (req, res) => {
       );
       soal.pilihan = pilihanRows;
     }
-
-    // Kirim response lengkap
     res.json({
       id: ujian.id,
       keterangan: ujian.keterangan,
       tanggal: ujian.tanggal,
-      jam_mulai: ujian.jam_mulai,         // penting
-      jam_berakhir: ujian.jam_berakhir,   // penting
-      acak_soal: !!ujian.acak_soal,       // <— TAMBAH: kirim flag acak_soal ke frontend
+      tanggal_berakhir: ujian.tanggal_berakhir,
+      jam_mulai: ujian.jam_mulai,
+      jam_berakhir: ujian.jam_berakhir,
+      acak_soal: !!ujian.acak_soal,
+      durasi: ujian.durasi,
       soalList: soalRows.map((s) => ({
         id: s.id,
         tipeSoal: s.tipe_soal,
         soalText: s.soal_text,
         gambar: s.gambar || null,
         pilihan:
-          s.tipe_soal === "pilihanGanda"
+          s.tipe_soal === "pilihanGanda" || s.tipe_soal === "teksSingkat"
             ? s.pilihan.map((p) => ({
                 id: p.id,
                 text: p.text,
@@ -263,11 +388,31 @@ router.get("/:id", async (req, res) => {
 });
 
 // ====================
-// DELETE - Hapus ujian (soft delete)
+// FUNGSI HELPER BARU UNTUK CEK KEPEMILIKAN
 // ====================
-router.delete("/:id", async (req, res) => {
+ async function checkOwnership(admin, examId) {
+   if (admin.role === 'superadmin') {
+     return true; // Superadmin boleh melakukan apa saja
+   }
+   
+   const [rows] = await pool.execute("SELECT admin_id FROM exams WHERE id = ?", [examId]);
+   if (rows.length === 0) {
+     throw new Error("Ujian tidak ditemukan");
+   }
+   
+   return rows[0].admin_id === admin.id;
+ }
+
+// ====================
+// DELETE - Hapus ujian
+// ====================
+router.delete("/:id", verifyAdmin, async (req, res) => {
   const { id } = req.params;
   try {
+    const isOwner = await checkOwnership(req.admin, id);
+   if (!isOwner) {
+     return res.status(403).json({ message: "Akses ditolak. Anda bukan pemilik ujian ini." });
+   }
     const [result] = await pool.execute(
       "UPDATE exams SET is_deleted = 1 WHERE id = ?",
       [id]
@@ -284,73 +429,147 @@ router.delete("/:id", async (req, res) => {
 
 // ====================
 // PUT - Update ujian
-// - Bisa menerima file upload baru ATAU mempertahankan path s.gambar
-// - Tambahan: update exams.acak_soal
 // ====================
-router.put("/:id", upload.any(), async (req, res) => {
+router.put("/:id", verifyAdmin, upload.any(), async (req, res) => {
   const { id } = req.params;
-  const bodyData = parseBodyData(req);
-  const { keterangan, tanggal, jamMulai, jamBerakhir, soalList, acakSoal } = bodyData;
 
-  if (!keterangan || !tanggal || !Array.isArray(soalList)) {
-    return res.status(400).json({ message: "Data tidak lengkap" });
+  const bodyData = parseBodyData(req);
+  const {
+    keterangan,
+    tanggal,
+    tanggalBerakhir,
+    jamMulai,
+    jamBerakhir,
+    durasi,
+    soalList,
+    acakSoal,
+  } = bodyData;
+
+  if (
+    !keterangan ||
+    !tanggal ||
+    !tanggalBerakhir ||
+    !jamMulai ||
+    !jamBerakhir ||
+    !durasi
+  ) {
+    return res
+      .status(400)
+      .json({
+        message: "Data utama (keterangan, waktu, durasi) tidak lengkap",
+      });
   }
 
   let conn;
   try {
+    const isOwner = await checkOwnership(req.admin, id);
+   if (!isOwner) {
+     return res.status(403).json({ message: "Akses ditolak. Anda bukan pemilik ujian ini." });
+   }
     conn = await pool.getConnection();
     await conn.beginTransaction();
 
     await conn.execute(
-      "UPDATE exams SET keterangan=?, tanggal=?, jam_mulai=?, jam_berakhir=?, acak_soal=? WHERE id=?",
-      [keterangan, tanggal, jamMulai, jamBerakhir, toBool(acakSoal) ? 1 : 0, id]
+      "UPDATE exams SET keterangan=?, tanggal=?, tanggal_berakhir=?, jam_mulai=?, jam_berakhir=?, acak_soal=?, durasi=? WHERE id=?",
+      [
+        keterangan,
+        tanggal,
+        tanggalBerakhir,
+        jamMulai,
+        jamBerakhir,
+        toBool(acakSoal) ? 1 : 0,
+        parseInt(durasi, 10) || 0,
+        id,
+      ]
     );
 
-    // Hapus dulu options yang terkait semua soal ujian ini (jika tidak ada ON DELETE CASCADE)
-    await conn.execute(
-      `DELETE o FROM options o
-       JOIN questions q ON o.question_id = q.id
-       WHERE q.exam_id = ?`,
-      [id]
-    );
-
-    // Hapus soal lama
-    await conn.execute("DELETE FROM questions WHERE exam_id=?", [id]);
-
-    // Simpan ulang soal + gambar
-    for (let i = 0; i < soalList.length; i++) {
-      const s = soalList[i] || {};
-      const file = req.files?.find((f) => f.fieldname === `gambar_${i}`);
-
-      const gambarFromBody =
-        s && typeof s.gambar === "string" && s.gambar.trim() !== ""
-          ? s.gambar.trim()
-          : null;
-
-      const gambarPath = file ? `/uploads/${file.filename}` : gambarFromBody;
-
-      const [qRes] = await conn.execute(
-        "INSERT INTO questions (exam_id, tipe_soal, soal_text, gambar) VALUES (?, ?, ?, ?)",
-        [id, s.tipeSoal || "", s.soalText || "", gambarPath]
+    if (Array.isArray(soalList)) {
+      const [dbSoalRows] = await pool.execute(
+        "SELECT id FROM questions WHERE exam_id = ?",
+        [id]
       );
-      const qId = qRes.insertId;
+      const dbSoalIds = new Set(dbSoalRows.map((q) => q.id));
+      const frontendSoalIds = new Set(
+        soalList
+          .filter((s) => typeof s.id === "number" && s.id > 0)
+          .map((s) => s.id)
+      );
 
-      if (s.tipeSoal === "pilihanGanda" && Array.isArray(s.pilihan)) {
+      for (const dbId of dbSoalIds) {
+        if (!frontendSoalIds.has(dbId)) {
+          await conn.execute("DELETE FROM options WHERE question_id = ?", [
+            dbId,
+          ]);
+          await conn.execute("DELETE FROM questions WHERE id = ?", [dbId]);
+        }
+      }
+
+      for (let i = 0; i < soalList.length; i++) {
+        const s = soalList[i] || {};
+        const file = req.files?.find((f) => f.fieldname === `gambar_${i}`);
+        const gambarFromBody =
+          s && typeof s.gambar === "string" && s.gambar.trim() !== ""
+            ? s.gambar.trim()
+            : null;
+        const gambarPath = file ? `/uploads/${file.filename}` : gambarFromBody;
+
         const kunci = (s.kunciJawabanText || "").trim();
         const correctIndex = s.pilihan.findIndex((t) => {
           const teks = typeof t === "string" ? t : t?.text || "";
           return teks.trim() === kunci;
         });
 
-        for (let j = 0; j < s.pilihan.length; j++) {
-          const teks =
-            typeof s.pilihan[j] === "string"
-              ? s.pilihan[j]
-              : s.pilihan[j]?.text || "";
+        if (typeof s.id === "number" && dbSoalIds.has(s.id)) {
+          const qId = s.id;
           await conn.execute(
-            "INSERT INTO options (question_id, opsi_text, is_correct) VALUES (?, ?, ?)",
-            [qId, teks, j === correctIndex]
+            "UPDATE questions SET tipe_soal = ?, soal_text = ?, gambar = ? WHERE id = ?",
+            [s.tipeSoal || "", s.soalText || "", gambarPath, qId]
           );
+
+          await conn.execute("DELETE FROM options WHERE question_id = ?", [
+            qId,
+          ]);
+          if (s.tipeSoal === "pilihanGanda" && Array.isArray(s.pilihan)) {
+            for (let j = 0; j < s.pilihan.length; j++) {
+              const teks =
+                typeof s.pilihan[j] === "string"
+                  ? s.pilihan[j]
+                  : s.pilihan[j]?.text || "";
+              await conn.execute(
+                "INSERT INTO options (question_id, opsi_text, is_correct) VALUES (?, ?, ?)",
+                [qId, teks, j === correctIndex]
+              );
+            }
+          } else if (s.tipeSoal === "teksSingkat" && s.kunciJawabanText) {
+            await conn.execute(
+              "INSERT INTO options (question_id, opsi_text, is_correct) VALUES (?, ?, ?)",
+              [qId, s.kunciJawabanText, 1]
+            );
+          }
+        } else {
+          const [qRes] = await conn.execute(
+            "INSERT INTO questions (exam_id, tipe_soal, soal_text, gambar) VALUES (?, ?, ?, ?)",
+            [id, s.tipeSoal || "", s.soalText || "", gambarPath]
+          );
+          const qId = qRes.insertId;
+
+          if (s.tipeSoal === "pilihanGanda" && Array.isArray(s.pilihan)) {
+            for (let j = 0; j < s.pilihan.length; j++) {
+              const teks =
+                typeof s.pilihan[j] === "string"
+                  ? s.pilihan[j]
+                  : s.pilihan[j]?.text || "";
+              await conn.execute(
+                "INSERT INTO options (question_id, opsi_text, is_correct) VALUES (?, ?, ?)",
+                [qId, teks, j === correctIndex]
+              );
+            }
+          } else if (s.tipeSoal === "teksSingkat" && s.kunciJawabanText) {
+            await conn.execute(
+              "INSERT INTO options (question_id, opsi_text, is_correct) VALUES (?, ?, ?)",
+              [qId, s.kunciJawabanText, 1]
+            );
+          }
         }
       }
     }
@@ -361,9 +580,11 @@ router.put("/:id", upload.any(), async (req, res) => {
     if (conn) {
       try {
         await conn.rollback();
-      } catch {}
+      } catch (rollErr) {
+        console.error("Rollback failed:", rollErr);
+      }
     }
-    console.error(err);
+    console.error("PUT /api/ujian/:id error:", err);
     return res
       .status(500)
       .json({ message: "Gagal memperbarui ujian.", error: err.message });
