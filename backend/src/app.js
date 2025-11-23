@@ -9,6 +9,7 @@ const inviteRouter = require("./routes/invite");
 const authAdminRoutes = require('./routes/authAdmin');
 const settingsRouter = require('./routes/settings');
 const emailRouter = require("./routes/email");
+const adminListRoute = require("./routes/adminList");
 
 const app = express();
 
@@ -32,6 +33,7 @@ app.use("/api/invite", inviteRouter);
 app.use('/api/admin', authAdminRoutes);
 app.use('/api/settings', settingsRouter);
 app.use("/api/email", emailRouter);
+app.use("/api/admin-list", adminListRoute);
 
 
 module.exports = app;

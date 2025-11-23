@@ -315,15 +315,77 @@ router.post("/login", async (req, res) => {
 });
 
 // ============================
+// DELETE /api/invite/:id - Hapus Undangan (Batalkan Akses)
+// ===================================
+router.delete("/:id", verifyAdmin, async (req, res) => {
+  const invitationId = req.params.id;
+  const { id: loggedInAdminId, role: adminRole } = req.admin;
+
+  try {
+    if (!invitationId) {
+      return res.status(400).json({ message: "ID Undangan wajib diisi." });
+    }
+
+    // 1. Cek kepemilikan: Hanya admin pemilik ujian yang bisa menghapus.
+    const [check] = await pool.execute(
+      `SELECT i.id
+       FROM invitations i
+       LEFT JOIN exams e ON i.exam_id = e.id
+       WHERE i.id = ? AND e.admin_id = ?`,
+      [invitationId, loggedInAdminId]
+    );
+
+    if (check.length === 0) {
+      // Superadmin diizinkan karena filter kepemilikan hanya ada di sini.
+      // Filter utama `verifyAdmin` sudah dijalankan.
+      if (adminRole !== 'superadmin') {
+         return res.status(403).json({ message: "Akses ditolak. Anda tidak memiliki izin untuk membatalkan undangan ini." });
+      }
+    }
+
+
+    // 2. Lakukan penghapusan
+    const [result] = await pool.execute(
+      "DELETE FROM invitations WHERE id = ?",
+      [invitationId]
+    );
+
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ message: "Undangan tidak ditemukan atau sudah terhapus." });
+    }
+
+    res.status(200).json({ message: "Undangan berhasil dibatalkan dan dihapus." });
+
+  } catch (error) {
+    console.error("Error membatalkan undangan:", error);
+    res.status(500).json({ message: "Terjadi kesalahan server saat membatalkan undangan." });
+  }
+});
+
+// ============================
 // GET /api/invite/list - Ambil Daftar Undangan Tersimpan
 // (Sudah diperbarui dengan filter kepemilikan)
 // ============================
+// File: src/routes/invite.js
+
 router.get("/list", verifyAdmin, async (req, res) => {
   try {
-    // Ambil ID admin yang sedang login dari token
-    const { id: loggedInAdminId } = req.admin;
+    // 1. Ambil ID & Role dari token, serta parameter query
+    const { id: loggedInAdminId, role } = req.admin;
+    const { target_admin_id } = req.query;
 
-    // Selalu filter berdasarkan pemilik ujian (admin_id)
+    // 2. Tentukan ID Admin yang akan di-query
+    // Default: Ambil data milik diri sendiri
+    let adminIdToQuery = loggedInAdminId;
+
+    // LOGIKA SUPERADMIN:
+    // Jika role superadmin DAN ada request melihat data admin lain,
+    // ubah ID target query ke ID tersebut.
+    if (role === 'superadmin' && target_admin_id) {
+      adminIdToQuery = target_admin_id;
+    }
+
+    // 3. Jalankan query dengan parameter dinamis (adminIdToQuery)
     const [rows] = await pool.execute(
       `SELECT 
         i.id, 
@@ -339,7 +401,7 @@ router.get("/list", verifyAdmin, async (req, res) => {
        WHERE k.admin_id = ?
        ORDER BY i.sent_at DESC 
        LIMIT 100`,
-      [loggedInAdminId]
+      [adminIdToQuery] // <-- Gunakan variabel ini, bukan loggedInAdminId
     );
 
     res.status(200).json(rows);

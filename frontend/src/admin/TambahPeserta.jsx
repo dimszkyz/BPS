@@ -9,11 +9,11 @@ import {
   FaTimes,
   FaListUl,
   FaKey,
-  FaCog, // Ikon untuk tombol pengaturan
-  FaCheckCircle, // <-- DITAMBAHKAN
+  FaCog,
+  FaCheckCircle,
 } from "react-icons/fa";
 import DaftarUndangan from "./DaftarUndangan";
-import EmailPengirim from "./EmailPengirim"; // Import komponen modal pengaturan email
+import EmailPengirim from "./EmailPengirim";
 
 const API_URL = "http://localhost:5000";
 
@@ -37,7 +37,7 @@ const TambahPeserta = () => {
   const [showEmailSettings, setShowEmailSettings] = useState(false);
 
   // --- STATE UNTUK TOAST ---
-  const [successMessage, setSuccessMessage] = useState(""); // <-- DITAMBAHKAN
+  const [successMessage, setSuccessMessage] = useState("");
 
   // --- Fetch Daftar Ujian saat komponen dimuat ---
   useEffect(() => {
@@ -98,22 +98,18 @@ const TambahPeserta = () => {
       return;
     }
 
-    // Validasi Batas Login
     const maxLoginsNum = parseInt(maxLogins, 10);
     if (isNaN(maxLoginsNum) || maxLoginsNum <= 0) {
       alert("Batas login minimal harus 1.");
       return;
     }
 
-    // Cek apakah ada email yang belum ditambahkan dari input
     const finalCurrentEmail = currentEmail.trim();
     let finalEmails = [...emails];
 
     if (finalCurrentEmail) {
       if (!isValidEmail(finalCurrentEmail)) {
-        alert(
-          `Format email "${finalCurrentEmail}" di input tidak valid. Harap tambahkan atau hapus.`
-        );
+        alert(`Format email "${finalCurrentEmail}" di input tidak valid.`);
         return;
       }
       if (!finalEmails.includes(finalCurrentEmail)) {
@@ -134,7 +130,6 @@ const TambahPeserta = () => {
     setLoading(true);
 
     try {
-      // Payload yang dikirim ke backend
       const payload = {
         exam_id: selectedExamId,
         pesan,
@@ -171,15 +166,11 @@ const TambahPeserta = () => {
         throw new Error(errorMessage);
       }
 
-      // --- PERUBAHAN DI SINI ---
-      // Mengganti alert() dengan setSuccessMessage
       setSuccessMessage(result.message || `Proses pengiriman selesai.`);
       setTimeout(() => setSuccessMessage(""), 7000);
-      // --- AKHIR PERUBAHAN ---
 
       setEmails([]);
       setCurrentEmail("");
-      // Trigger refresh pada daftar riwayat undangan
       setRefreshKey((prevKey) => prevKey + 1);
     } catch (error) {
       console.error("Error mengirim undangan:", error);
@@ -190,11 +181,11 @@ const TambahPeserta = () => {
   };
 
   return (
-    <div className="bg-gray-50 min-h-screen flex flex-col relative">
-      {/* --- TOAST SUKSES (DITAMBAHKAN) --- */}
+    <div className="bg-gray-50 min-h-screen flex flex-col relative pb-10">
+      {/* --- TOAST SUKSES --- */}
       {successMessage && (
-        <div className="fixed top-20 left-1/2 -translate-x-1/2 z-[100]">
-          <div className="flex items-center gap-3 bg-green-600 text-white px-5 py-3 rounded-lg shadow-lg">
+        <div className="fixed top-24 left-1/2 -translate-x-1/2 z-[100]">
+          <div className="flex items-center gap-3 bg-green-600 text-white px-5 py-3 rounded-lg shadow-lg animate-bounce-in">
             <FaCheckCircle className="text-white w-5 h-5" />
             <span className="font-semibold text-base">{successMessage}</span>
           </div>
@@ -202,45 +193,54 @@ const TambahPeserta = () => {
       )}
 
       {/* Header */}
-      <div className="bg-white shadow-sm border-b border-gray-300 px-8 py-5 sticky top-0 z-50 flex justify-between items-center">
-        <h2 className="text-2xl font-semibold text-gray-900 flex items-center gap-2">
-          <FaPaperPlane className="text-blue-600 w-6 h-6" />
+      <div className="bg-white shadow-sm border-b border-gray-200 px-6 py-4 sticky top-0 z-40 flex justify-between items-center">
+        <h2 className="text-xl md:text-2xl font-bold text-gray-800 flex items-center gap-2">
+          <div className="p-2 bg-blue-100 rounded-lg">
+            <FaPaperPlane className="text-blue-600 w-5 h-5" />
+          </div>
           Undang Peserta Ujian
         </h2>
 
         {/* Tombol Pengaturan Email */}
         <button
           onClick={() => setShowEmailSettings(true)}
-          className="flex items-center gap-2 px-4 py-2 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 transition text-sm font-medium border border-gray-300"
+          className="flex items-center gap-2 px-4 py-2 bg-white text-gray-600 rounded-lg hover:bg-gray-50 hover:text-blue-600 transition text-sm font-medium border border-gray-300 shadow-sm"
           title="Konfigurasi Email Pengirim"
         >
-          <FaCog /> Pengaturan Email
+          <FaCog /> <span className="hidden sm:inline">Pengaturan Email</span>
         </button>
       </div>
 
-      {/* Konten Utama */}
-      <div className="p-6 md:p-10 flex-1">
-        <div className="flex flex-col md:flex-row gap-6 lg:gap-8 items-start max-w-6xl mx-auto">
-          {/* Kolom Kiri: Form Undangan */}
-          <div className="w-full md:w-7/12 lg:w-1/2">
-            <div className="bg-white rounded-xl shadow-md border border-gray-200 p-6 md:p-8">
-              <form onSubmit={handleSubmit} className="space-y-6">
-                {/* --- BAGIAN PENGATURAN UJIAN --- */}
-                <div className="grid grid-cols-2 gap-4">
-                  {/* Pilih Ujian */}
-                  <div className="col-span-2">
-                    <label
-                      htmlFor="ujian"
-                      className="block text-sm font-medium text-gray-700 mb-1"
-                    >
-                      <FaListUl className="inline-block mr-1 text-blue-500" />
-                      Pilih Ujian
-                    </label>
+      {/* Konten Utama - Layout Stacked (Atas Bawah) */}
+      <div className="p-6 max-w-6xl mx-auto w-full space-y-8">
+        
+        {/* BAGIAN 1: FORM PENGIRIMAN (Atas) */}
+        <section className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+          <div className="bg-gray-50 px-6 py-4 border-b border-gray-200">
+            <h3 className="font-semibold text-gray-700 flex items-center gap-2">
+              <FaEnvelope className="text-gray-500" /> Form Undangan
+            </h3>
+          </div>
+          
+          <div className="p-6 md:p-8">
+            <form onSubmit={handleSubmit} className="space-y-6">
+              {/* Grid untuk Pilihan Ujian & Batas Login */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                {/* Pilih Ujian */}
+                <div className="md:col-span-2">
+                  <label
+                    htmlFor="ujian"
+                    className="block text-sm font-medium text-gray-700 mb-1.5"
+                  >
+                    <FaListUl className="inline-block mr-1 text-blue-500" />
+                    Pilih Ujian
+                  </label>
+                  <div className="relative">
                     <select
                       id="ujian"
                       value={selectedExamId}
                       onChange={(e) => setSelectedExamId(e.target.value)}
-                      className="w-full px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition bg-white"
+                      className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition bg-white"
                       required
                       disabled={loadingUjian}
                     >
@@ -256,98 +256,72 @@ const TambahPeserta = () => {
                       ))}
                     </select>
                   </div>
-
-                  {/* Batas Login */}
-                  <div>
-                    <label
-                      htmlFor="max_logins"
-                      className="block text-sm font-medium text-gray-700 mb-1"
-                    >
-                      <FaKey className="inline-block mr-1 text-yellow-500" />
-                      Batas Akses Login
-                    </label>
-                    <input
-                      type="number"
-                      id="max_logins"
-                      value={maxLogins}
-                      onChange={(e) => setMaxLogins(e.target.value)}
-                      className="w-full px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition"
-                      min="1"
-                      required
-                    />
-                  </div>
                 </div>
 
-                {/* Textarea Pesan */}
+                {/* Batas Login */}
                 <div>
                   <label
-                    htmlFor="pesan"
-                    className="block text-sm font-medium text-gray-700 mb-1"
+                    htmlFor="max_logins"
+                    className="block text-sm font-medium text-gray-700 mb-1.5"
                   >
-                    Isi Email Undangan
+                    <FaKey className="inline-block mr-1 text-yellow-500" />
+                    Batas Akses Login
+                  </label>
+                  <input
+                    type="number"
+                    id="max_logins"
+                    value={maxLogins}
+                    onChange={(e) => setMaxLogins(e.target.value)}
+                    className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition"
+                    min="1"
+                    required
+                  />
+                </div>
+              </div>
+
+              {/* Grid untuk Pesan & Input Email */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                {/* Kiri: Textarea Pesan */}
+                <div className="flex flex-col">
+                  <label
+                    htmlFor="pesan"
+                    className="block text-sm font-medium text-gray-700 mb-1.5"
+                  >
+                    Isi Pesan Email
                   </label>
                   <textarea
                     id="pesan"
                     value={pesan}
                     onChange={(e) => setPesan(e.target.value)}
-                    rows="5"
-                    className="w-full px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition placeholder-gray-400"
+                    className="w-full flex-1 p-4 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition resize-none placeholder-gray-400"
                     placeholder="Tulis isi email undangan di sini..."
+                    style={{ minHeight: "180px" }}
                     required
                   />
                 </div>
 
-                {/* Input Email Dinamis */}
-                <div>
+                {/* Kanan: Input Email Dinamis */}
+                <div className="flex flex-col">
                   <label
                     htmlFor="currentEmail"
-                    className="block text-sm font-medium text-gray-700 mb-1"
+                    className="block text-sm font-medium text-gray-700 mb-1.5"
                   >
-                    Email Peserta
+                    Daftar Email Peserta
                   </label>
 
-                  {/* Daftar Email */}
-                  {emails.length > 0 && (
-                    <div className="mb-3 p-3 border border-gray-200 rounded-md bg-gray-50 max-h-40 overflow-y-auto">
-                      <ul className="space-y-1">
-                        {emails.map((email, index) => (
-                          <li
-                            key={index}
-                            className="flex justify-between items-center text-sm bg-white p-1.5 rounded border border-gray-300"
-                          >
-                            <span
-                              className="text-gray-700 truncate mr-2"
-                              title={email}
-                            >
-                              {email}
-                            </span>
-                            <button
-                              type="button"
-                              onClick={() => handleRemoveEmail(index)}
-                              className="text-red-500 hover:text-red-700 p-1 rounded-full hover:bg-red-100"
-                              title={`Hapus ${email}`}
-                            >
-                              <FaTimes className="w-3 h-3" />
-                            </button>
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
-                  )}
-
                   {/* Input + Tombol Tambah */}
-                  <div className="flex items-center gap-2">
+                  <div className="flex gap-2 mb-3">
                     <div className="relative flex-1">
                       <span className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-gray-400">
-                        <FaEnvelope className="w-4 h-4" />
+                        <FaEnvelope />
                       </span>
                       <input
                         type="email"
                         id="currentEmail"
                         value={currentEmail}
                         onChange={(e) => setCurrentEmail(e.target.value)}
-                        className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition placeholder-gray-400"
-                        placeholder="Masukkan email lalu klik Tambah"
+                        className="w-full pl-9 pr-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition"
+                        placeholder="user@example.com"
                         onKeyDown={(e) => {
                           if (e.key === "Enter") {
                             e.preventDefault();
@@ -359,74 +333,96 @@ const TambahPeserta = () => {
                     <button
                       type="button"
                       onClick={handleAddEmail}
-                      className="flex-shrink-0 flex items-center gap-1.5 px-3 py-2 bg-green-500 text-white rounded-md hover:bg-green-600 transition text-sm font-medium"
-                      title="Tambahkan email ke daftar"
+                      className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition font-medium flex items-center gap-1"
                     >
-                      <FaPlus className="w-3 h-3" /> Tambah
+                      <FaPlus /> Tambah
                     </button>
                   </div>
-                  <p className="text-xs text-gray-500 mt-1">
-                    Tekan Enter atau klik Tambah.
+
+                  {/* List Email Container */}
+                  <div 
+                    className="flex-1 border border-gray-200 rounded-lg bg-gray-50 p-2 overflow-y-auto"
+                    style={{ maxHeight: "135px", minHeight: "135px" }}
+                  >
+                    {emails.length === 0 ? (
+                      <p className="text-gray-400 text-sm text-center mt-10">
+                        Belum ada email ditambahkan
+                      </p>
+                    ) : (
+                      <ul className="space-y-1">
+                        {emails.map((email, index) => (
+                          <li
+                            key={index}
+                            className="flex justify-between items-center text-sm bg-white px-3 py-1.5 rounded border border-gray-200 shadow-sm"
+                          >
+                            <span className="text-gray-700 truncate mr-2" title={email}>
+                              {email}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => handleRemoveEmail(index)}
+                              className="text-gray-400 hover:text-red-500 p-1 transition"
+                              title="Hapus"
+                            >
+                              <FaTimes />
+                            </button>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                  <p className="text-xs text-gray-500 mt-1 text-right">
+                    {emails.length} Email terdaftar
                   </p>
                 </div>
+              </div>
 
-                {/* Tombol Kirim Undangan */}
-                <div className="pt-4">
-                  <button
-                    type="submit"
-                    disabled={
-                      loading ||
-                      (emails.length === 0 && !currentEmail.trim()) ||
-                      !selectedExamId
-                    }
-                    className={`w-full flex justify-center items-center gap-2 px-4 py-3 rounded-md text-white font-semibold shadow transition ${
-                      loading ||
-                      (emails.length === 0 && !currentEmail.trim()) ||
-                      !selectedExamId
-                        ? "bg-gray-400 cursor-not-allowed"
-                        : "bg-blue-600 hover:bg-blue-700"
-                    }`}
-                  >
-                    {loading ? (
-                      <>
-                        <FaSyncAlt className="animate-spin" /> Mengirim...
-                      </>
-                    ) : (
-                      <>
-                        <FaPaperPlane /> Kirim Undangan ke{" "}
-                        {emails.length +
-                          (currentEmail.trim() &&
-                          !emails.includes(currentEmail.trim())
-                            ? 1
-                            : 0)}{" "}
-                        Email
-                      </>
-                    )}
-                  </button>
-                </div>
-              </form>
-            </div>
+              {/* Tombol Submit */}
+              <div className="pt-2 border-t border-gray-100 flex justify-end">
+                <button
+                  type="submit"
+                  disabled={
+                    loading ||
+                    (emails.length === 0 && !currentEmail.trim()) ||
+                    !selectedExamId
+                  }
+                  className={`flex justify-center items-center gap-2 px-8 py-3 rounded-lg text-white font-semibold shadow-md transition-all ${
+                    loading ||
+                    (emails.length === 0 && !currentEmail.trim()) ||
+                    !selectedExamId
+                      ? "bg-gray-400 cursor-not-allowed"
+                      : "bg-blue-600 hover:bg-blue-700 hover:shadow-lg active:scale-95"
+                  }`}
+                >
+                  {loading ? (
+                    <>
+                      <FaSyncAlt className="animate-spin" /> Mengirim...
+                    </>
+                  ) : (
+                    <>
+                      <FaPaperPlane /> Kirim Undangan
+                    </>
+                  )}
+                </button>
+              </div>
+            </form>
           </div>
+        </section>
 
-          {/* Kolom Kanan: Riwayat Undangan */}
-          <div className="w-full md:w-5/12 lg:flex-1">
-            <div className="bg-white rounded-xl shadow-md border border-gray-200 p-6 md:p-8">
-              <DaftarUndangan refreshTrigger={refreshKey} />
-            </div>
-          </div>
-        </div>
+        {/* BAGIAN 2: RIWAYAT UNDANGAN (Bawah - Full Width) */}
+        <section className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+          {/* Memanggil DaftarUndangan dengan lebar penuh */}
+          <DaftarUndangan refreshTrigger={refreshKey} />
+        </section>
       </div>
 
       {/* --- MODAL PENGATURAN EMAIL --- */}
       {showEmailSettings && (
-        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
-          {/* Overlay agar bisa klik di luar untuk menutup (opsional) */}
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
           <div
             className="absolute inset-0"
             onClick={() => setShowEmailSettings(false)}
           ></div>
-
-          {/* Konten Modal */}
           <div className="relative w-full max-w-2xl z-10">
             <EmailPengirim onClose={() => setShowEmailSettings(false)} />
           </div>

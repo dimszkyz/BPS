@@ -60,6 +60,7 @@ router.post("/", verifyAdmin, upload.any(), async (req, res) => {
     durasi,
     soalList,
     acakSoal,
+    acakOpsi, // NEW
   } = bodyData;
 
   if (
@@ -76,7 +77,7 @@ router.post("/", verifyAdmin, upload.any(), async (req, res) => {
       .json({ message: "Payload tidak valid. Pastikan durasi terisi." });
   }
 
- const loggedInAdminId = req.admin.id;
+  const loggedInAdminId = req.admin.id;
 
   let conn;
   try {
@@ -84,7 +85,7 @@ router.post("/", verifyAdmin, upload.any(), async (req, res) => {
     await conn.beginTransaction();
 
     const [examResult] = await conn.execute(
-      "INSERT INTO exams (keterangan, tanggal, tanggal_berakhir, jam_mulai, jam_berakhir, acak_soal, durasi, admin_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+      "INSERT INTO exams (keterangan, tanggal, tanggal_berakhir, jam_mulai, jam_berakhir, acak_soal, acak_opsi, durasi, admin_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
       [
         keterangan,
         tanggal,
@@ -92,8 +93,9 @@ router.post("/", verifyAdmin, upload.any(), async (req, res) => {
         jamMulai,
         jamBerakhir,
         toBool(acakSoal) ? 1 : 0,
+        toBool(acakOpsi) ? 1 : 0, // NEW
         parseInt(durasi, 10) || 0,
-        loggedInAdminId
+        loggedInAdminId,
       ]
     );
     const examId = examResult.insertId;
@@ -160,7 +162,14 @@ router.post("/", verifyAdmin, upload.any(), async (req, res) => {
 // ====================
 router.get("/", verifyAdmin, async (req, res) => {
   try {
-    const { id: loggedInAdminId } = req.admin;
+    const { id: loggedInAdminId, role } = req.admin;
+    const { target_admin_id } = req.query;
+
+    let adminIdToQuery = loggedInAdminId;
+
+    if (role === "superadmin" && target_admin_id) {
+      adminIdToQuery = target_admin_id;
+    }
 
     const query = `
       SELECT * FROM exams
@@ -169,7 +178,7 @@ router.get("/", verifyAdmin, async (req, res) => {
       ORDER BY created_at ASC
     `;
 
-    const [rows] = await pool.execute(query, [loggedInAdminId]);
+    const [rows] = await pool.execute(query, [adminIdToQuery]);
     res.json(rows);
   } catch (err) {
     console.error(err);
@@ -177,9 +186,8 @@ router.get("/", verifyAdmin, async (req, res) => {
   }
 });
 
-
 // ====================
-// GET - Ambil ujian AKTIF berdasarkan tanggal (Legacy, mungkin tidak terpakai lagi tapi biarkan)
+// GET - Ambil ujian AKTIF berdasarkan tanggal (Legacy)
 // ====================
 router.get("/tanggal/:tgl", async (req, res) => {
   try {
@@ -192,7 +200,6 @@ router.get("/tanggal/:tgl", async (req, res) => {
     if (rows.length === 0) {
       return res.status(404).json({ message: "Tidak ada ujian di tanggal ini" });
     }
-    // ... (Logika legacy disederhanakan, fokus ke check-active/:id)
     return res.json(rows[0]);
   } catch (err) {
     res.status(500).json({ message: "Gagal mengambil ujian" });
@@ -218,45 +225,29 @@ router.get("/check-active/:id", async (req, res) => {
 
     const ujian = rows[0];
 
-    // --- 1. Dapatkan Waktu Sekarang (WIB) yang PASTI ---
-    // Gunakan Intl.DateTimeFormat untuk memaksa zona waktu Asia/Jakarta
-    // terlepas dari setting server.
     const now = new Date();
     const wibDateFormatter = new Intl.DateTimeFormat("en-CA", {
-      timeZone: "Asia/Jakarta", // Paksa WIB
+      timeZone: "Asia/Jakarta",
       year: "numeric",
       month: "2-digit",
       day: "2-digit",
     });
     const wibTimeFormatter = new Intl.DateTimeFormat("en-GB", {
-      timeZone: "Asia/Jakarta", // Paksa WIB
+      timeZone: "Asia/Jakarta",
       hour: "2-digit",
       minute: "2-digit",
       second: "2-digit",
       hour12: false,
     });
 
-    const nowWIB_Date = wibDateFormatter.format(now); // Format: "YYYY-MM-DD"
-    const nowWIB_Time = wibTimeFormatter.format(now); // Format: "HH:mm:ss"
+    const nowWIB_Date = wibDateFormatter.format(now);
+    const nowWIB_Time = wibTimeFormatter.format(now);
 
-    console.log("--- DEBUG WAKTU (WIB) ---");
-    console.log("Current Date (WIB):", nowWIB_Date);
-    console.log("Current Time (WIB):", nowWIB_Time);
-
-    // --- 2. Ambil Jadwal dari DB ---
-    // Pastikan format tanggal DB juga YYYY-MM-DD
     const startDate = new Date(ujian.tanggal).toLocaleDateString("en-CA");
-    const endDate = new Date(ujian.tanggal_berakhir).toLocaleDateString(
-      "en-CA"
-    );
-    const startTime = ujian.jam_mulai; // Format DB biasanya sudah "HH:mm:ss"
+    const endDate = new Date(ujian.tanggal_berakhir).toLocaleDateString("en-CA");
+    const startTime = ujian.jam_mulai;
     const endTime = ujian.jam_berakhir;
 
-    console.log("Exam Date Range:", startDate, "s/d", endDate);
-    console.log("Exam Time Window (Daily):", startTime, "-", endTime);
-
-    // --- 3. Cek Apakah HARI INI masuk dalam rentang tanggal ---
-    // String comparison YYYY-MM-DD aman untuk tanggal
     if (nowWIB_Date < startDate) {
       return res.status(403).json({
         message: `Ujian belum dimulai. Tanggal mulai: ${startDate}`,
@@ -268,8 +259,6 @@ router.get("/check-active/:id", async (req, res) => {
       });
     }
 
-    // --- 4. Cek Apakah JAM SEKARANG masuk dalam jendela waktu HARIAN ---
-    // String comparison HH:mm:ss juga aman untuk waktu 24 jam
     if (nowWIB_Time < startTime) {
       return res.status(403).json({
         message: `Ujian hari ini belum dibuka. Jam akses: ${startTime} - ${endTime} WIB`,
@@ -281,20 +270,19 @@ router.get("/check-active/:id", async (req, res) => {
       });
     }
 
-    // Jika lolos semua cek, berarti ujian AKTIF
     return res.json(ujian);
   } catch (err) {
     console.error("Error GET /check-active/:id:", err);
     res.status(500).json({ message: "Gagal memverifikasi status ujian." });
   }
 });
+
 // ====================
 // GET - Detail ujian publik (tanpa verifyAdmin)
 // ====================
 router.get("/public/:id", async (req, res) => {
   const { id } = req.params;
   try {
-    // Ambil ujian
     const [ujianRows] = await pool.execute(
       "SELECT * FROM exams WHERE id = ? AND is_deleted = 0",
       [id]
@@ -305,7 +293,6 @@ router.get("/public/:id", async (req, res) => {
 
     const ujian = ujianRows[0];
 
-    // Ambil semua soal dan opsinya
     const [soalRows] = await pool.execute(
       "SELECT id, tipe_soal AS tipeSoal, soal_text AS soalText, gambar FROM questions WHERE exam_id = ?",
       [id]
@@ -329,15 +316,15 @@ router.get("/public/:id", async (req, res) => {
 // ====================
 // GET - Detail ujian berdasarkan ID
 // ====================
-router.get("/:id", verifyAdmin, async (req, res) => { // <-- TAMBAH verifyAdmin
+router.get("/:id", verifyAdmin, async (req, res) => {
   const { id } = req.params;
   try {
-    // ▼▼▼ TAMBAHKAN BLOK INI ▼▼▼
     const isOwner = await checkOwnership(req.admin, id);
     if (!isOwner) {
-      return res.status(403).json({ message: "Akses ditolak. Anda bukan pemilik ujian ini." });
+      return res
+        .status(403)
+        .json({ message: "Akses ditolak. Anda bukan pemilik ujian ini." });
     }
-    // ▲▲▲ AKHIR BLOK TAMBAHAN ▲▲▲
 
     const [ujianRows] = await pool.execute("SELECT * FROM exams WHERE id = ?", [
       id,
@@ -346,10 +333,12 @@ router.get("/:id", verifyAdmin, async (req, res) => { // <-- TAMBAH verifyAdmin
       return res.status(404).json({ message: "Ujian tidak ditemukan" });
     }
     const ujian = ujianRows[0];
+
     const [soalRows] = await pool.execute(
       "SELECT * FROM questions WHERE exam_id = ?",
       [id]
     );
+
     for (const soal of soalRows) {
       const [pilihanRows] = await pool.execute(
         "SELECT id, opsi_text AS text, is_correct FROM options WHERE question_id = ?",
@@ -357,14 +346,16 @@ router.get("/:id", verifyAdmin, async (req, res) => { // <-- TAMBAH verifyAdmin
       );
       soal.pilihan = pilihanRows;
     }
+
     res.json({
       id: ujian.id,
       keterangan: ujian.keterangan,
       tanggal: ujian.tanggal,
       tanggal_berakhir: ujian.tanggal_berakhir,
       jam_mulai: ujian.jam_mulai,
-      jam_berakhir: ujian.jam_berakhir,
+      jam_berakhir: ujian.jam_berakhir, // FIX/ADD
       acak_soal: !!ujian.acak_soal,
+      acak_opsi: !!ujian.acak_opsi, // NEW
       durasi: ujian.durasi,
       soalList: soalRows.map((s) => ({
         id: s.id,
@@ -390,29 +381,35 @@ router.get("/:id", verifyAdmin, async (req, res) => { // <-- TAMBAH verifyAdmin
 // ====================
 // FUNGSI HELPER BARU UNTUK CEK KEPEMILIKAN
 // ====================
- async function checkOwnership(admin, examId) {
-   if (admin.role === 'superadmin') {
-     return true; // Superadmin boleh melakukan apa saja
-   }
-   
-   const [rows] = await pool.execute("SELECT admin_id FROM exams WHERE id = ?", [examId]);
-   if (rows.length === 0) {
-     throw new Error("Ujian tidak ditemukan");
-   }
-   
-   return rows[0].admin_id === admin.id;
- }
+async function checkOwnership(admin, examId) {
+  if (admin.role === "superadmin") {
+    return true;
+  }
+
+  const [rows] = await pool.execute(
+    "SELECT admin_id FROM exams WHERE id = ?",
+    [examId]
+  );
+  if (rows.length === 0) {
+    throw new Error("Ujian tidak ditemukan");
+  }
+
+  return rows[0].admin_id === admin.id;
+}
 
 // ====================
-// DELETE - Hapus ujian
+// DELETE - Hapus ujian (soft delete)
 // ====================
 router.delete("/:id", verifyAdmin, async (req, res) => {
   const { id } = req.params;
   try {
     const isOwner = await checkOwnership(req.admin, id);
-   if (!isOwner) {
-     return res.status(403).json({ message: "Akses ditolak. Anda bukan pemilik ujian ini." });
-   }
+    if (!isOwner) {
+      return res
+        .status(403)
+        .json({ message: "Akses ditolak. Anda bukan pemilik ujian ini." });
+    }
+
     const [result] = await pool.execute(
       "UPDATE exams SET is_deleted = 1 WHERE id = ?",
       [id]
@@ -443,6 +440,7 @@ router.put("/:id", verifyAdmin, upload.any(), async (req, res) => {
     durasi,
     soalList,
     acakSoal,
+    acakOpsi, // NEW
   } = bodyData;
 
   if (
@@ -453,24 +451,25 @@ router.put("/:id", verifyAdmin, upload.any(), async (req, res) => {
     !jamBerakhir ||
     !durasi
   ) {
-    return res
-      .status(400)
-      .json({
-        message: "Data utama (keterangan, waktu, durasi) tidak lengkap",
-      });
+    return res.status(400).json({
+      message: "Data utama (keterangan, waktu, durasi) tidak lengkap",
+    });
   }
 
   let conn;
   try {
     const isOwner = await checkOwnership(req.admin, id);
-   if (!isOwner) {
-     return res.status(403).json({ message: "Akses ditolak. Anda bukan pemilik ujian ini." });
-   }
+    if (!isOwner) {
+      return res
+        .status(403)
+        .json({ message: "Akses ditolak. Anda bukan pemilik ujian ini." });
+    }
+
     conn = await pool.getConnection();
     await conn.beginTransaction();
 
     await conn.execute(
-      "UPDATE exams SET keterangan=?, tanggal=?, tanggal_berakhir=?, jam_mulai=?, jam_berakhir=?, acak_soal=?, durasi=? WHERE id=?",
+      "UPDATE exams SET keterangan=?, tanggal=?, tanggal_berakhir=?, jam_mulai=?, jam_berakhir=?, acak_soal=?, acak_opsi=?, durasi=? WHERE id=?",
       [
         keterangan,
         tanggal,
@@ -478,6 +477,7 @@ router.put("/:id", verifyAdmin, upload.any(), async (req, res) => {
         jamMulai,
         jamBerakhir,
         toBool(acakSoal) ? 1 : 0,
+        toBool(acakOpsi) ? 1 : 0, // NEW
         parseInt(durasi, 10) || 0,
         id,
       ]
@@ -514,13 +514,16 @@ router.put("/:id", verifyAdmin, upload.any(), async (req, res) => {
         const gambarPath = file ? `/uploads/${file.filename}` : gambarFromBody;
 
         const kunci = (s.kunciJawabanText || "").trim();
-        const correctIndex = s.pilihan.findIndex((t) => {
-          const teks = typeof t === "string" ? t : t?.text || "";
-          return teks.trim() === kunci;
-        });
+        const correctIndex = Array.isArray(s.pilihan)
+          ? s.pilihan.findIndex((t) => {
+              const teks = typeof t === "string" ? t : t?.text || "";
+              return teks.trim() === kunci;
+            })
+          : -1;
 
         if (typeof s.id === "number" && dbSoalIds.has(s.id)) {
           const qId = s.id;
+
           await conn.execute(
             "UPDATE questions SET tipe_soal = ?, soal_text = ?, gambar = ? WHERE id = ?",
             [s.tipeSoal || "", s.soalText || "", gambarPath, qId]
@@ -529,6 +532,7 @@ router.put("/:id", verifyAdmin, upload.any(), async (req, res) => {
           await conn.execute("DELETE FROM options WHERE question_id = ?", [
             qId,
           ]);
+
           if (s.tipeSoal === "pilihanGanda" && Array.isArray(s.pilihan)) {
             for (let j = 0; j < s.pilihan.length; j++) {
               const teks =

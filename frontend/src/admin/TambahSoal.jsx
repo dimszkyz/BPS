@@ -1,4 +1,5 @@
-import React, { useState } from "react";
+// File: src/admin/TambahSoal.jsx
+import React, { useState, useRef } from "react";
 import {
   FaCalendarAlt,
   FaClock,
@@ -9,12 +10,219 @@ import {
   FaCogs,
   FaListAlt,
   FaImage,
+  FaFileExcel,
+  FaDownload,
+  FaUpload,
 } from "react-icons/fa";
+import * as XLSX from "xlsx";
 
 const getAdminToken = () => {
   const token = sessionStorage.getItem("adminToken");
   if (!token) throw new Error("Token tidak ditemukan.");
   return token;
+};
+
+// ---------- Excel Helpers ----------
+const downloadWorkbook = (wb, filename = "template_soal.xlsx") => {
+  const wbout = XLSX.write(wb, { bookType: "xlsx", type: "array" });
+  const blob = new Blob([wbout], { type: "application/octet-stream" });
+  const url = window.URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.click();
+  window.URL.revokeObjectURL(url);
+};
+
+const buildTemplateWorkbook = () => {
+  // Sheet TEMPLATE_SOAL
+  const soalHeaders = [
+    "tipeSoal",
+    "soalText",
+    "pilihan1",
+    "pilihan2",
+    "pilihan3",
+    "pilihan4",
+    "pilihan5",
+    "kunciJawaban",
+    "gambarUrl",
+  ];
+
+  const contohSoal = [
+    {
+      tipeSoal: "pilihanGanda",
+      soalText: "Contoh soal PG: Ibu membeli 2 apel ... berapa totalnya?",
+      pilihan1: "10.000",
+      pilihan2: "15.000",
+      pilihan3: "20.000",
+      pilihan4: "",
+      pilihan5: "",
+      kunciJawaban: "3",
+      gambarUrl: "",
+    },
+    {
+      tipeSoal: "teksSingkat",
+      soalText: "Contoh teks singkat: 2 + 2 = ?",
+      pilihan1: "",
+      pilihan2: "",
+      pilihan3: "",
+      pilihan4: "",
+      pilihan5: "",
+      kunciJawaban: "4, empat",
+      gambarUrl: "",
+    },
+    {
+      tipeSoal: "esay",
+      soalText: "Contoh esai: Jelaskan pendapatmu tentang ...",
+      pilihan1: "",
+      pilihan2: "",
+      pilihan3: "",
+      pilihan4: "",
+      pilihan5: "",
+      kunciJawaban: "",
+      gambarUrl: "",
+    },
+  ];
+
+  const wsSoal = XLSX.utils.json_to_sheet(contohSoal, { header: soalHeaders });
+  XLSX.utils.sheet_add_aoa(wsSoal, [soalHeaders], { origin: "A1" });
+
+  // Sheet PENGATURAN_UJIAN (1 baris)
+  const settingHeaders = [
+    "keterangan",
+    "tanggalMulai",
+    "tanggalBerakhir",
+    "jamMulai",
+    "jamBerakhir",
+    "durasiMenit",
+    "acakSoal",
+    "acakOpsi",
+  ];
+
+  const contohSetting = [
+    {
+      keterangan: "Ujian Matematika Dasar",
+      tanggalMulai: "2025-01-01",
+      tanggalBerakhir: "2025-01-02",
+      jamMulai: "08:00",
+      jamBerakhir: "17:00",
+      durasiMenit: "90",
+      acakSoal: "TRUE",
+      acakOpsi: "TRUE",
+    },
+  ];
+
+  const wsSetting = XLSX.utils.json_to_sheet(contohSetting, {
+    header: settingHeaders,
+  });
+  XLSX.utils.sheet_add_aoa(wsSetting, [settingHeaders], { origin: "A1" });
+
+  // Sheet PETUNJUK
+  const petunjuk = [
+    ["PETUNJUK PENGISIAN TEMPLATE"],
+    [""],
+    ["A. PENGATURAN_UJIAN (isi hanya 1 baris)"],
+    ["1) keterangan: judul/keterangan ujian."],
+    ["2) tanggalMulai & tanggalBerakhir format: YYYY-MM-DD (contoh 2025-01-01)."],
+    ["3) jamMulai & jamBerakhir format: HH:MM (contoh 08:00)."],
+    ["4) durasiMenit wajib angka > 0 (menit)."],
+    ["5) acakSoal & acakOpsi isi TRUE/FALSE atau 1/0."],
+    [""],
+    ["B. TEMPLATE_SOAL (1 soal per baris)"],
+    ["1) tipeSoal: pilihanGanda / teksSingkat / esay (boleh juga: esai/essay -> otomatis jadi esay)."],
+    ["2) soalText wajib diisi."],
+    ["3) Untuk pilihanGanda, isi minimal pilihan1 & pilihan2. pilihan3-5 opsional."],
+    ["4) kunciJawaban untuk pilihanGanda boleh angka 1-5, huruf A-E, atau teks jawaban yang sama persis dengan salah satu pilihan."],
+    ["5) kunciJawaban untuk teksSingkat isi jawaban benar, kalau lebih dari satu pisahkan dengan koma. Contoh: 2, dua"],
+    ["6) esay tidak perlu kunciJawaban dan pilihan."],
+    ["7) gambarUrl opsional: isi URL gambar (preview tampil), tapi tidak upload file otomatis."],
+  ];
+  const wsPetunjuk = XLSX.utils.aoa_to_sheet(petunjuk);
+
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, wsSetting, "PENGATURAN_UJIAN");
+  XLSX.utils.book_append_sheet(wb, wsSoal, "TEMPLATE_SOAL");
+  XLSX.utils.book_append_sheet(wb, wsPetunjuk, "PETUNJUK");
+
+  return wb;
+};
+
+const normalizeTipe = (raw) => {
+  const v = String(raw || "").trim().toLowerCase();
+  if (!v) return "pilihanGanda";
+  if (["pg", "pilihanganda", "pilihan ganda", "pilihan_ganda"].includes(v))
+    return "pilihanGanda";
+  if (["teks", "singkat", "teks singkat", "textsingkat", "short"].includes(v))
+    return "teksSingkat";
+  if (["esai", "essay", "esay", "uraian"].includes(v)) return "esay";
+  return "pilihanGanda";
+};
+
+const parseKunciPG = (rawKunci, pilihanTexts) => {
+  const v = String(rawKunci || "").trim();
+  if (!v) return 1;
+
+  const num = parseInt(v, 10);
+  if (!Number.isNaN(num) && num >= 1 && num <= pilihanTexts.length) return num;
+
+  const letterMap = { A: 1, B: 2, C: 3, D: 4, E: 5 };
+  const up = v.toUpperCase();
+  if (letterMap[up] && letterMap[up] <= pilihanTexts.length)
+    return letterMap[up];
+
+  const idx = pilihanTexts.findIndex(
+    (p) => String(p).trim().toLowerCase() === v.toLowerCase()
+  );
+  if (idx !== -1) return idx + 1;
+
+  return 1;
+};
+
+const pad2 = (n) => String(n).padStart(2, "0");
+
+const excelDateToISO = (val) => {
+  if (!val) return "";
+  if (val instanceof Date && !isNaN(val)) {
+    return val.toISOString().slice(0, 10);
+  }
+  if (typeof val === "number") {
+    const d = XLSX.SSF.parse_date_code(val);
+    if (d && d.y && d.m && d.d) {
+      return `${d.y}-${pad2(d.m)}-${pad2(d.d)}`;
+    }
+  }
+  const s = String(val).trim();
+  const m1 = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (m1) {
+    const [_, dd, mm, yyyy] = m1;
+    return `${yyyy}-${pad2(mm)}-${pad2(dd)}`;
+  }
+  const m2 = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+  if (m2) {
+    const [_, yyyy, mm, dd] = m2;
+    return `${yyyy}-${pad2(mm)}-${pad2(dd)}`;
+  }
+  return s;
+};
+
+const excelTimeToHHMM = (val) => {
+  if (!val) return "";
+  if (typeof val === "number") {
+    const totalMinutes = Math.round(val * 24 * 60);
+    const hh = Math.floor(totalMinutes / 60);
+    const mm = totalMinutes % 60;
+    return `${pad2(hh)}:${pad2(mm)}`;
+  }
+  const s = String(val).trim();
+  const m = s.match(/^(\d{1,2})[:.](\d{1,2})/);
+  if (m) return `${pad2(m[1])}:${pad2(m[2])}`;
+  return s;
+};
+
+const excelBoolToJS = (val) => {
+  const v = String(val || "").trim().toLowerCase();
+  if (["true", "1", "ya", "yes", "y"].includes(v)) return true;
+  return false;
 };
 
 const TambahSoal = () => {
@@ -24,7 +232,10 @@ const TambahSoal = () => {
   const [jamMulai, setJamMulai] = useState("");
   const [jamBerakhir, setJamBerakhir] = useState("");
   const [durasi, setDurasi] = useState("");
+
   const [acakSoal, setAcakSoal] = useState(false);
+  const [acakOpsi, setAcakOpsi] = useState(false);
+
   const [successMessage, setSuccessMessage] = useState("");
   const [daftarSoal, setDaftarSoal] = useState([
     {
@@ -38,11 +249,12 @@ const TambahSoal = () => {
         { id: 2, text: "" },
       ],
       kunciJawaban: 1,
-      kunciJawabanText: "", // <-- PERUBAHAN DI SINI
+      kunciJawabanText: "",
     },
   ]);
 
-  // === HANDLER GAMBAR ===
+  const excelInputRef = useRef(null);
+
   const handleFileChange = (soalId, file) => {
     const updated = daftarSoal.map((s) => {
       if (s.id === soalId) {
@@ -57,7 +269,6 @@ const TambahSoal = () => {
     setDaftarSoal(updated);
   };
 
-  // === HANDLER SOAL ===
   const handleTambahSoal = () => {
     const newId = daftarSoal.length + 1;
     setDaftarSoal([
@@ -73,7 +284,7 @@ const TambahSoal = () => {
           { id: 2, text: "" },
         ],
         kunciJawaban: 1,
-        kunciJawabanText: "", // <-- PERUBAHAN DI SINI
+        kunciJawabanText: "",
       },
     ]);
   };
@@ -93,15 +304,14 @@ const TambahSoal = () => {
     setDaftarSoal(updated);
   };
 
-  // === HANDLER PILIHAN ===
   const handleTambahPilihan = (soalId) => {
     setDaftarSoal((prev) =>
       prev.map((s) =>
         s.id === soalId
           ? {
-            ...s,
-            pilihan: [...s.pilihan, { id: s.pilihan.length + 1, text: "" }],
-          }
+              ...s,
+              pilihan: [...s.pilihan, { id: s.pilihan.length + 1, text: "" }],
+            }
           : s
       )
     );
@@ -135,11 +345,11 @@ const TambahSoal = () => {
       prev.map((s) =>
         s.id === soalId
           ? {
-            ...s,
-            pilihan: s.pilihan.map((p) =>
-              p.id === pilihanId ? { ...p, text } : p
-            ),
-          }
+              ...s,
+              pilihan: s.pilihan.map((p) =>
+                p.id === pilihanId ? { ...p, text } : p
+              ),
+            }
           : s
       )
     );
@@ -147,15 +357,231 @@ const TambahSoal = () => {
 
   const handleKunciJawabanChange = (soalId, pilihanId) => {
     setDaftarSoal((prev) =>
-      prev.map((s) => (s.id === soalId ? { ...s, kunciJawaban: pilihanId } : s))
+      prev.map((s) =>
+        s.id === soalId ? { ...s, kunciJawaban: pilihanId } : s
+      )
     );
+  };
+
+  // ---------- Excel Actions ----------
+  const handleDownloadTemplate = () => {
+    const wb = buildTemplateWorkbook();
+    downloadWorkbook(wb, "template_import_ujian_dan_soal.xlsx");
+  };
+
+  const handleExportSoalExcel = () => {
+    const settingHeaders = [
+      "keterangan",
+      "tanggalMulai",
+      "tanggalBerakhir",
+      "jamMulai",
+      "jamBerakhir",
+      "durasiMenit",
+      "acakSoal",
+      "acakOpsi",
+    ];
+
+    const settingRow = [
+      {
+        keterangan: keterangan || "",
+        tanggalMulai: tanggal || "",
+        tanggalBerakhir: tanggalBerakhir || "",
+        jamMulai: jamMulai || "",
+        jamBerakhir: jamBerakhir || "",
+        durasiMenit: durasi || "",
+        acakSoal: acakSoal ? "TRUE" : "FALSE",
+        acakOpsi: acakOpsi ? "TRUE" : "FALSE",
+      },
+    ];
+
+    const wsSetting = XLSX.utils.json_to_sheet(settingRow, {
+      header: settingHeaders,
+    });
+    XLSX.utils.sheet_add_aoa(wsSetting, [settingHeaders], { origin: "A1" });
+
+    const soalHeaders = [
+      "tipeSoal",
+      "soalText",
+      "pilihan1",
+      "pilihan2",
+      "pilihan3",
+      "pilihan4",
+      "pilihan5",
+      "kunciJawaban",
+      "gambarUrl",
+    ];
+
+    const soalRows = daftarSoal.map((s) => {
+      const pilihanTexts =
+        s.tipeSoal === "pilihanGanda" ? s.pilihan.map((p) => p.text) : [];
+      return {
+        tipeSoal: s.tipeSoal,
+        soalText: s.soalText,
+        pilihan1: pilihanTexts[0] || "",
+        pilihan2: pilihanTexts[1] || "",
+        pilihan3: pilihanTexts[2] || "",
+        pilihan4: pilihanTexts[3] || "",
+        pilihan5: pilihanTexts[4] || "",
+        kunciJawaban:
+          s.tipeSoal === "pilihanGanda"
+            ? String(s.kunciJawaban || 1)
+            : s.tipeSoal === "teksSingkat"
+            ? s.kunciJawabanText || ""
+            : "",
+        gambarUrl: s.gambarPreview && !s.gambar ? s.gambarPreview : "",
+      };
+    });
+
+    const wsSoal = XLSX.utils.json_to_sheet(soalRows, { header: soalHeaders });
+    XLSX.utils.sheet_add_aoa(wsSoal, [soalHeaders], { origin: "A1" });
+
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, wsSetting, "PENGATURAN_UJIAN");
+    XLSX.utils.book_append_sheet(wb, wsSoal, "TEMPLATE_SOAL");
+
+    downloadWorkbook(wb, "export_ujian_dan_soal.xlsx");
+  };
+
+  const handleImportExcelFile = async (file) => {
+    try {
+      const buffer = await file.arrayBuffer();
+      const wb = XLSX.read(buffer, { type: "array", cellDates: true });
+
+      // --- Import Pengaturan (opsional) ---
+      const settingSheetName = wb.SheetNames.find(
+        (n) => n.toLowerCase() === "pengaturan_ujian"
+      );
+      if (settingSheetName) {
+        const wsSetting = wb.Sheets[settingSheetName];
+        const settingJson = XLSX.utils.sheet_to_json(wsSetting, {
+          defval: "",
+          raw: false,
+        });
+        const s0 = settingJson[0] || {};
+        const norm = Object.fromEntries(
+          Object.entries(s0).map(([k, v]) => [String(k).trim().toLowerCase(), v])
+        );
+
+        setKeterangan(String(norm["keterangan"] || ""));
+        setTanggal(excelDateToISO(norm["tanggalmulai"] || norm["tanggal_mulai"]));
+        setTanggalBerakhir(
+          excelDateToISO(norm["tanggalberakhir"] || norm["tanggal_berakhir"])
+        );
+        setJamMulai(excelTimeToHHMM(norm["jammulai"] || norm["jam_mulai"]));
+        setJamBerakhir(
+          excelTimeToHHMM(norm["jamberakhir"] || norm["jam_berakhir"])
+        );
+        setDurasi(String(norm["durasimenit"] || norm["durasi"] || ""));
+        setAcakSoal(excelBoolToJS(norm["acaksoal"]));
+        setAcakOpsi(excelBoolToJS(norm["acakopsi"]));
+      }
+
+      // --- Import Soal ---
+      const soalSheetName =
+        wb.SheetNames.find((n) =>
+          ["template_soal", "soal", "sheet1"].includes(n.toLowerCase())
+        ) || wb.SheetNames[0];
+
+      const wsSoal = wb.Sheets[soalSheetName];
+      const json = XLSX.utils.sheet_to_json(wsSoal, { defval: "" });
+
+      const imported = [];
+      let idCounter = 1;
+
+      for (const row of json) {
+        const lowerRow = Object.fromEntries(
+          Object.entries(row).map(([k, v]) => [
+            String(k).trim().toLowerCase(),
+            v,
+          ])
+        );
+
+        const tipeSoal = normalizeTipe(
+          lowerRow["tipesoal"] || lowerRow["tipe_soal"]
+        );
+        const soalText =
+          lowerRow["soaltext"] ||
+          lowerRow["soal_text"] ||
+          lowerRow["pertanyaan"] ||
+          "";
+
+        if (!String(soalText).trim()) continue;
+
+        const pilihanTexts = [];
+        for (let i = 1; i <= 5; i++) {
+          const val =
+            lowerRow[`pilihan${i}`] ||
+            lowerRow[`opsi${i}`] ||
+            lowerRow[`opsi ${i}`] ||
+            lowerRow[`choice${i}`] ||
+            "";
+          if (String(val).trim()) pilihanTexts.push(String(val));
+        }
+
+        let pgTexts = pilihanTexts;
+        if (tipeSoal === "pilihanGanda") {
+          if (pgTexts.length < 2) pgTexts = [...pgTexts, "", ""].slice(0, 2);
+        } else {
+          pgTexts = [];
+        }
+
+        const kunciRaw =
+          lowerRow["kuncijawaban"] ||
+          lowerRow["kunci_jawaban"] ||
+          lowerRow["jawaban"] ||
+          "";
+
+        const gambarUrl =
+          lowerRow["gambarurl"] || lowerRow["gambar_url"] || "";
+
+        const pilihanObjs = pgTexts.map((t, idx) => ({
+          id: idx + 1,
+          text: t,
+        }));
+
+        imported.push({
+          id: idCounter++,
+          tipeSoal,
+          soalText: String(soalText),
+          gambar: null,
+          gambarPreview: String(gambarUrl).trim() || null,
+          pilihan:
+            tipeSoal === "pilihanGanda"
+              ? pilihanObjs
+              : [
+                  { id: 1, text: "" },
+                  { id: 2, text: "" },
+                ],
+          kunciJawaban:
+            tipeSoal === "pilihanGanda"
+              ? parseKunciPG(kunciRaw, pgTexts)
+              : 1,
+          kunciJawabanText:
+            tipeSoal === "teksSingkat" ? String(kunciRaw) : "",
+        });
+      }
+
+      if (imported.length === 0) {
+        alert("File Excel tidak berisi soal yang valid.");
+        return;
+      }
+
+      setDaftarSoal(imported);
+      alert(`Berhasil import ${imported.length} soal dari Excel.`);
+    } catch (err) {
+      console.error(err);
+      alert("Gagal membaca file Excel. Pastikan formatnya sesuai template.");
+    }
+  };
+
+  const handleClickImport = () => {
+    if (excelInputRef.current) excelInputRef.current.click();
   };
 
   // === SUBMIT ===
   const handleSubmit = async (e) => {
     e.preventDefault();
 
-    // Validasi
     if (!jamMulai || !jamBerakhir) {
       alert("Jam mulai dan jam berakhir wajib diisi.");
       return;
@@ -172,15 +598,14 @@ const TambahSoal = () => {
     const soalList = daftarSoal.map((s) => ({
       tipeSoal: s.tipeSoal,
       soalText: s.soalText,
-      pilihan: s.tipeSoal === "pilihanGanda" ? s.pilihan.map((p) => p.text) : [],
-      // <-- PERUBAHAN DI SINI -->
+      pilihan:
+        s.tipeSoal === "pilihanGanda" ? s.pilihan.map((p) => p.text) : [],
       kunciJawabanText:
         s.tipeSoal === "pilihanGanda"
           ? s.pilihan.find((p) => p.id === s.kunciJawaban)?.text || ""
           : s.tipeSoal === "teksSingkat"
-            ? s.kunciJawabanText || ""
-            : "",
-      // <-- AKHIR PERUBAHAN -->
+          ? s.kunciJawabanText || ""
+          : "",
     }));
 
     const formData = new FormData();
@@ -194,15 +619,13 @@ const TambahSoal = () => {
         jamBerakhir,
         durasi,
         acakSoal,
+        acakOpsi,
         soalList,
       })
     );
 
-    // Tambahkan file gambar jika ada
     daftarSoal.forEach((s, i) => {
-      if (s.gambar) {
-        formData.append(`gambar_${i}`, s.gambar);
-      }
+      if (s.gambar) formData.append(`gambar_${i}`, s.gambar);
     });
 
     try {
@@ -211,20 +634,16 @@ const TambahSoal = () => {
 
       const res = await fetch("http://localhost:5000/api/ujian", {
         method: "POST",
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
+        headers: { Authorization: `Bearer ${token}` },
         body: formData,
       });
 
       const json = await res.json();
       if (!res.ok) throw new Error(json.message || "Gagal menyimpan ujian");
 
-      // Tampilkan toast tanpa ID
       setSuccessMessage("Ujian Berhasil Disimpan");
       setTimeout(() => setSuccessMessage(""), 7000);
 
-      // Reset form
       setKeterangan("");
       setTanggal("");
       setTanggalBerakhir("");
@@ -232,6 +651,8 @@ const TambahSoal = () => {
       setJamBerakhir("");
       setDurasi("");
       setAcakSoal(false);
+      setAcakOpsi(false);
+
       setDaftarSoal([
         {
           id: 1,
@@ -244,7 +665,7 @@ const TambahSoal = () => {
             { id: 2, text: "" },
           ],
           kunciJawaban: 1,
-          kunciJawabanText: "", // <-- PERUBAHAN DI SINI
+          kunciJawabanText: "",
         },
       ]);
     } catch (err) {
@@ -253,7 +674,6 @@ const TambahSoal = () => {
     }
   };
 
-  // === STYLE ===
   const labelClass =
     "block text-sm font-semibold text-gray-700 mb-1 tracking-wide";
   const inputClass =
@@ -265,7 +685,6 @@ const TambahSoal = () => {
 
   return (
     <div className="bg-gray-50 min-h-screen">
-      {/* TOAST SUKSES */}
       {successMessage && (
         <div className="fixed top-20 left-1/2 -translate-x-1/2 z-40">
           <div className="flex items-center gap-3 bg-green-600 text-white px-5 py-3 rounded-lg shadow-lg">
@@ -275,30 +694,68 @@ const TambahSoal = () => {
         </div>
       )}
 
-      {/* HEADER */}
       <div className="bg-white shadow-sm border-b border-gray-300 px-8 py-4 flex justify-between items-center sticky top-0 z-50">
-        {/* Judul di Kiri */}
         <h2 className="text-2xl font-semibold text-gray-900 flex items-center gap-2">
           🧩 Tambah Ujian
         </h2>
 
-        {/* Tombol di Kanan */}
-        <div className="flex gap-3">
+        <div className="flex gap-2 flex-wrap">
+          <button
+            type="button"
+            onClick={handleDownloadTemplate}
+            className="flex items-center gap-2 py-2 px-4 rounded-md bg-emerald-600 text-white font-semibold shadow hover:bg-emerald-700 transition text-sm"
+          >
+            <FaDownload className="w-4 h-4" />
+            Template Excel
+          </button>
+
+          <button
+            type="button"
+            onClick={handleExportSoalExcel}
+            className="flex items-center gap-2 py-2 px-4 rounded-md bg-indigo-600 text-white font-semibold shadow hover:bg-indigo-700 transition text-sm"
+          >
+            <FaFileExcel className="w-4 h-4" />
+            Export Ujian
+          </button>
+
+          <button
+            type="button"
+            onClick={handleClickImport}
+            className="flex items-center gap-2 py-2 px-4 rounded-md bg-orange-600 text-white font-semibold shadow hover:bg-orange-700 transition text-sm"
+          >
+            <FaUpload className="w-4 h-4" />
+            Import Excel
+          </button>
+
           <button
             type="submit"
-            form="form-ujian" // <--- TAMBAHKAN INI
-            className="flex items-center gap-2 py-2.5 px-5 rounded-md bg-blue-600 text-white font-semibold shadow hover:bg-blue-700 transition"
+            form="form-ujian"
+            className="flex items-center gap-2 py-2.5 px-5 rounded-md bg-blue-600 text-white font-semibold shadow hover:bg-blue-700 transition text-sm"
           >
             <FaSave className="w-4 h-4" />
             Simpan Semua Soal
           </button>
-        </div>
 
+          <input
+            ref={excelInputRef}
+            type="file"
+            accept=".xlsx,.xls"
+            className="hidden"
+            onChange={(e) => {
+              const f = e.target.files?.[0];
+              if (f) handleImportExcelFile(f);
+              e.target.value = "";
+            }}
+          />
+        </div>
       </div>
 
-      {/* FORM */}
       <div className="p-6 md:p-10">
-        <form id="form-ujian" onSubmit={handleSubmit} className="space-y-8 max-w-5xl mx-auto">
+        <form
+          id="form-ujian"
+          onSubmit={handleSubmit}
+          className="space-y-8 max-w-5xl mx-auto"
+        >
           {/* PENGATURAN UJIAN */}
           <fieldset className={fieldsetClass}>
             <div className="flex items-center gap-2 mb-5 border-b pb-2 border-gray-200">
@@ -320,9 +777,10 @@ const TambahSoal = () => {
                 />
               </div>
 
-              {/* JENDELA AKSES (TANGGAL) */}
               <div className="relative">
-                <label className={labelClass}>Tanggal Mulai (Akses Dibuka)</label>
+                <label className={labelClass}>
+                  Tanggal Mulai (Akses Dibuka)
+                </label>
                 <div className="absolute inset-y-0 left-3 flex items-center pt-6 z-10">
                   <FaCalendarAlt className="text-gray-400" />
                 </div>
@@ -351,7 +809,6 @@ const TambahSoal = () => {
                 />
               </div>
 
-              {/* JENDELA AKSES (JAM) */}
               <div className="relative">
                 <label className={labelClass}>Jam Mulai (Akses Dibuka)</label>
                 <div className="absolute inset-y-0 left-3 flex items-center pt-6 z-10">
@@ -367,7 +824,9 @@ const TambahSoal = () => {
               </div>
 
               <div className="relative">
-                <label className={labelClass}>Jam Berakhir (Akses Ditutup)</label>
+                <label className={labelClass}>
+                  Jam Berakhir (Akses Ditutup)
+                </label>
                 <div className="absolute inset-y-0 left-3 flex items-center pt-6 z-10">
                   <FaClock className="text-gray-400" />
                 </div>
@@ -380,7 +839,6 @@ const TambahSoal = () => {
                 />
               </div>
 
-              {/* FIELD DURASI */}
               <div className="md:col-span-2">
                 <label className={labelClass}>Durasi Pengerjaan (Menit)</label>
                 <input
@@ -399,17 +857,28 @@ const TambahSoal = () => {
               </div>
             </div>
 
-            {/* Acak Urutan Soal */}
-            <div className="mt-4">
-              <label className="inline-flex items-center gap-2 text-sm text-gray-700">
-                <input
-                  type="checkbox"
-                  checked={acakSoal}
-                  onChange={() => setAcakSoal(!acakSoal)}
-                  className="h-4 w-4"
-                />
-                Acak urutan soal untuk setiap peserta
-              </label>
+            <div className="mt-4 space-y-2">
+              <div className="flex flex-col gap-3">
+                <label className="inline-flex items-center gap-2 text-sm text-gray-700">
+                  <input
+                    type="checkbox"
+                    checked={acakSoal}
+                    onChange={() => setAcakSoal(!acakSoal)}
+                    className="h-4 w-4"
+                  />
+                  Acak soal pilihan ganda untuk setiap peserta
+                </label>
+
+                <label className="inline-flex items-center gap-2 text-sm text-gray-700">
+                  <input
+                    type="checkbox"
+                    checked={acakOpsi}
+                    onChange={() => setAcakOpsi(!acakOpsi)}
+                    className="h-4 w-4"
+                  />
+                  Acak jawaban pilihan ganda untuk setiap peserta
+                </label>
+              </div>
             </div>
           </fieldset>
 
@@ -433,7 +902,6 @@ const TambahSoal = () => {
                 </button>
               </div>
 
-              {/* Upload Gambar */}
               <div className="mb-4">
                 <label className={labelClass}>
                   <FaImage className="inline mr-1 text-blue-500" />
@@ -454,11 +922,9 @@ const TambahSoal = () => {
                 )}
               </div>
 
-              {/* Tipe & Teks Soal */}
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div>
                   <label className={labelClass}>Tipe Soal</label>
-                  {/* <-- PERUBAHAN DI SINI --> */}
                   <select
                     value={soal.tipeSoal}
                     onChange={(e) =>
@@ -470,7 +936,6 @@ const TambahSoal = () => {
                     <option value="teksSingkat">Teks Singkat (Auto-Nilai)</option>
                     <option value="esay">Esai (Nilai Manual)</option>
                   </select>
-                  {/* <-- AKHIR PERUBAHAN --> */}
                 </div>
 
                 <div className="md:col-span-2">
@@ -487,7 +952,6 @@ const TambahSoal = () => {
                 </div>
               </div>
 
-              {/* Pilihan Ganda */}
               {soal.tipeSoal === "pilihanGanda" && (
                 <div className="mt-5 border-t border-gray-200 pt-4">
                   <h4 className="text-base font-semibold text-gray-800 mb-2">
@@ -539,8 +1003,6 @@ const TambahSoal = () => {
                 </div>
               )}
 
-              {/* <-- PERUBAHAN DI SINI (BLOK BARU) --> */}
-              {/* Kunci Jawaban Teks Singkat */}
               {soal.tipeSoal === "teksSingkat" && (
                 <div className="mt-5 border-t border-gray-200 pt-4">
                   <h4 className="text-base font-semibold text-gray-800 mb-2">
@@ -561,16 +1023,14 @@ const TambahSoal = () => {
                     required
                   />
                   <p className="text-xs text-gray-500 mt-1">
-                    Gunakan tanda <b>,</b> (tanda koma) untuk memisahkan jika
-                    ada lebih dari satu jawaban benar.
+                    Gunakan tanda <b>,</b> untuk memisahkan jika ada lebih dari
+                    satu jawaban benar.
                     <br />
                     Contoh: <b>2 , dua , 2 (dua)</b>
                   </p>
                 </div>
               )}
-              {/* <-- AKHIR PERUBAHAN --> */}
 
-              {/* Info Esai */}
               {soal.tipeSoal === "esay" && (
                 <div className="bg-blue-50 border-l-4 border-blue-400 p-3 rounded-r-md mt-4">
                   <div className="flex">
@@ -584,7 +1044,6 @@ const TambahSoal = () => {
             </fieldset>
           ))}
 
-          {/* Tombol Tambah & Simpan */}
           <div className="flex justify-between items-center">
             <button
               type="button"

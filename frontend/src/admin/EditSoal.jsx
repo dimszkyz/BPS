@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { useParams, useNavigate } from "react-router-dom";
+import { useParams, useNavigate, useLocation } from "react-router-dom";
 import {
   FaCalendarAlt,
   FaClock,
@@ -9,14 +9,32 @@ import {
   FaCogs,
   FaListAlt,
   FaImage,
-  FaCheckCircle, // <-- 1. TAMBAHKAN ICON INI
+  FaCheckCircle,
+  FaFileExcel, // NEW
 } from "react-icons/fa";
+import * as XLSX from "xlsx"; // NEW
 
 const API_URL = "http://localhost:5000";
+
+// ---------- Excel Helpers (NEW) ----------
+const downloadWorkbook = (wb, filename = "export_ujian_dan_soal.xlsx") => {
+  const wbout = XLSX.write(wb, { bookType: "xlsx", type: "array" });
+  const blob = new Blob([wbout], { type: "application/octet-stream" });
+  const url = window.URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.click();
+  window.URL.revokeObjectURL(url);
+};
 
 const EditSoal = () => {
   const { id } = useParams();
   const navigate = useNavigate();
+
+  const location = useLocation();
+  // Cek apakah ada sinyal 'fromSuperAdmin' yang dikirim dari TabUjianAdmin
+  const isFromSuperAdmin = location.state?.fromSuperAdmin === true;
 
   const [loading, setLoading] = useState(true);
   const [keterangan, setKeterangan] = useState("");
@@ -25,9 +43,12 @@ const EditSoal = () => {
   const [jamMulai, setJamMulai] = useState("");
   const [jamBerakhir, setJamBerakhir] = useState("");
   const [durasi, setDurasi] = useState("");
+
   const [acakSoal, setAcakSoal] = useState(false);
+  const [acakOpsi, setAcakOpsi] = useState(false); // NEW
+
   const [daftarSoal, setDaftarSoal] = useState([]);
-  const [successMessage, setSuccessMessage] = useState(""); // <-- 2. TAMBAHKAN STATE INI
+  const [successMessage, setSuccessMessage] = useState("");
 
   // =======================================================
   // ▼▼▼ FETCH DATA UJIAN (DIPERBARUI) ▼▼▼
@@ -65,7 +86,9 @@ const EditSoal = () => {
         setJamMulai(data.jam_mulai || "");
         setJamBerakhir(data.jam_berakhir || "");
         setDurasi(data.durasi || "");
+
         setAcakSoal(data.acak_soal || false);
+        setAcakOpsi(data.acak_opsi || false); // NEW
 
         // [PERBAIKAN] Simpan ID asli dari database
         setDaftarSoal(
@@ -86,12 +109,10 @@ const EditSoal = () => {
               s.tipeSoal === "pilihanGanda"
                 ? (s.pilihan || []).find((p) => p.isCorrect)?.id || 0
                 : 0,
-            // <-- PERUBAHAN DI SINI -->
             kunciJawabanText:
               s.tipeSoal === "teksSingkat"
                 ? (s.pilihan || []).find((p) => p.isCorrect)?.text || ""
                 : "",
-            // <-- AKHIR PERUBAHAN -->
           }))
         );
       } catch (err) {
@@ -106,7 +127,90 @@ const EditSoal = () => {
   // ▲▲▲ AKHIR FETCH DATA ▲▲▲
   // =======================================================
 
-  // === HANDLER GAMBAR === (Tidak berubah)
+  // ---------- EXPORT UJIAN + SOAL (NEW) ----------
+  const handleExportUjianSoalExcel = () => {
+  const settingHeaders = [
+    "keterangan",
+    "tanggalMulai",
+    "tanggalBerakhir",
+    "jamMulai",
+    "jamBerakhir",
+    "durasiMenit",
+    "acakSoal",
+    "acakOpsi",
+  ];
+
+  const settingRow = [
+    {
+      keterangan: keterangan || "",
+      tanggalMulai: tanggal || "",
+      tanggalBerakhir: tanggalBerakhir || "",
+      jamMulai: jamMulai || "",
+      jamBerakhir: jamBerakhir || "",
+      durasiMenit: durasi || "",
+      acakSoal: acakSoal ? "TRUE" : "FALSE",
+      acakOpsi: acakOpsi ? "TRUE" : "FALSE",
+    },
+  ];
+
+  const wsSetting = XLSX.utils.json_to_sheet(settingRow, {
+    header: settingHeaders,
+  });
+  XLSX.utils.sheet_add_aoa(wsSetting, [settingHeaders], { origin: "A1" });
+
+  const soalHeaders = [
+    "tipeSoal",
+    "soalText",
+    "pilihan1",
+    "pilihan2",
+    "pilihan3",
+    "pilihan4",
+    "pilihan5",
+    "kunciJawaban",
+    "gambarUrl",
+  ];
+
+  const soalRows = daftarSoal.map((s) => {
+    const pilihanTexts =
+      s.tipeSoal === "pilihanGanda" ? s.pilihan.map((p) => p.text) : [];
+
+    // ✅ ubah ID kunci → index pilihan (1..n)
+    let kunciIndex = "";
+    if (s.tipeSoal === "pilihanGanda") {
+      const idx = (s.pilihan || []).findIndex((p) => p.id === s.kunciJawaban);
+      kunciIndex = String(idx >= 0 ? idx + 1 : 1);
+    }
+
+    return {
+      tipeSoal: s.tipeSoal,
+      soalText: s.soalText,
+      pilihan1: pilihanTexts[0] || "",
+      pilihan2: pilihanTexts[1] || "",
+      pilihan3: pilihanTexts[2] || "",
+      pilihan4: pilihanTexts[3] || "",
+      pilihan5: pilihanTexts[4] || "",
+      kunciJawaban:
+        s.tipeSoal === "pilihanGanda"
+          ? kunciIndex
+          : s.tipeSoal === "teksSingkat"
+          ? s.kunciJawabanText || ""
+          : "",
+      gambarUrl: s.gambarPreview || "",
+    };
+  });
+
+  const wsSoal = XLSX.utils.json_to_sheet(soalRows, { header: soalHeaders });
+  XLSX.utils.sheet_add_aoa(wsSoal, [soalHeaders], { origin: "A1" });
+
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, wsSetting, "PENGATURAN_UJIAN");
+  XLSX.utils.book_append_sheet(wb, wsSoal, "TEMPLATE_SOAL");
+
+  downloadWorkbook(wb, `export_ujian_${id}.xlsx`);
+};
+
+
+  // === HANDLER GAMBAR ===
   const handleFileChange = (soalId, file) => {
     const updated = daftarSoal.map((s) => {
       if (s.id === soalId) {
@@ -148,7 +252,7 @@ const EditSoal = () => {
           { id: newPilId2, text: "" },
         ],
         kunciJawaban: newPilId1,
-        kunciJawabanText: "", // <-- PERUBAHAN DI SINI
+        kunciJawabanText: "",
       },
     ]);
   };
@@ -224,7 +328,9 @@ const EditSoal = () => {
 
   const handleKunciJawabanChange = (soalId, pilihanId) => {
     setDaftarSoal((prev) =>
-      prev.map((s) => (s.id === soalId ? { ...s, kunciJawaban: pilihanId } : s))
+      prev.map((s) =>
+        s.id === soalId ? { ...s, kunciJawaban: pilihanId } : s
+      )
     );
   };
 
@@ -256,14 +362,12 @@ const EditSoal = () => {
         ? s.gambarPreview.replace(`${API_URL}/api/ujian`, "")
         : null,
       pilihan: s.tipeSoal === "pilihanGanda" ? s.pilihan : [],
-      // <-- PERUBAHAN DI SINI -->
       kunciJawabanText:
         s.tipeSoal === "pilihanGanda"
           ? s.pilihan.find((p) => p.id === s.kunciJawaban)?.text || ""
           : s.tipeSoal === "teksSingkat"
           ? s.kunciJawabanText || ""
           : "",
-      // <-- AKHIR PERUBAHAN -->
     }));
 
     const formData = new FormData();
@@ -277,6 +381,7 @@ const EditSoal = () => {
         jamBerakhir,
         durasi,
         acakSoal,
+        acakOpsi, // NEW
         soalList,
       })
     );
@@ -300,18 +405,15 @@ const EditSoal = () => {
       const json = await res.json();
       if (!res.ok) throw new Error(json.message || "Gagal menyimpan perubahan");
 
-      // ==================================================
-      // ▼▼▼ PERUBAHAN LOGIKA NOTIFIKASI ▼▼▼
-      // ==================================================
       setSuccessMessage("Ujian berhasil diperbarui!");
 
-      // Tunggu 3 detik baru pindah halaman
       setTimeout(() => {
-        navigate("/admin/daftar-soal");
+        if (isFromSuperAdmin) {
+          navigate(-1);
+        } else {
+          navigate("/admin/daftar-soal");
+        }
       }, 3000);
-      // ==================================================
-      // ▲▲▲ AKHIR PERUBAHAN ▲▲▲
-      // ==================================================
     } catch (err) {
       alert("Terjadi kesalahan: " + err.message);
     }
@@ -327,7 +429,7 @@ const EditSoal = () => {
       </p>
     );
 
-  // === STYLE === (Tidak berubah)
+  // === STYLE ===
   const labelClass =
     "block text-sm font-semibold text-gray-700 mb-1 tracking-wide";
   const inputClass =
@@ -337,10 +439,9 @@ const EditSoal = () => {
   const fieldsetClass =
     "bg-white rounded-xl border border-gray-100 shadow-sm p-6 transition duration-200";
 
-  // === RENDER === (DIPERBARUI)
   return (
     <div className="bg-gray-50 min-h-screen flex flex-col">
-      {/* 3. TAMBAHKAN BLOK TOAST DI SINI */}
+      {/* TOAST SUKSES */}
       {successMessage && (
         <div className="fixed top-20 left-1/2 -translate-x-1/2 z-40">
           <div className="flex items-center gap-3 bg-green-600 text-white px-5 py-3 rounded-lg shadow-lg">
@@ -357,8 +458,24 @@ const EditSoal = () => {
         </h2>
 
         <div className="flex gap-3">
+          {/* NEW: Export button */}
           <button
-            onClick={() => navigate("/admin/daftar-soal")}
+            type="button"
+            onClick={handleExportUjianSoalExcel}
+            className="flex items-center gap-2 px-4 py-2 rounded-md bg-indigo-600 text-white font-semibold shadow hover:bg-indigo-700 transition"
+          >
+            <FaFileExcel className="w-4 h-4" />
+            Export Ujian
+          </button>
+
+          <button
+            onClick={() => {
+              if (isFromSuperAdmin) {
+                navigate(-1);
+              } else {
+                navigate("/admin/daftar-soal");
+              }
+            }}
             className="flex items-center gap-2 px-4 py-2 rounded-md bg-gray-300 text-gray-800 font-semibold shadow hover:bg-gray-400 transition"
           >
             Batal
@@ -400,7 +517,9 @@ const EditSoal = () => {
 
               {/* JENDELA AKSES (TANGGAL) */}
               <div className="relative">
-                <label className={labelClass}>Tanggal Mulai (Akses Dibuka)</label>
+                <label className={labelClass}>
+                  Tanggal Mulai (Akses Dibuka)
+                </label>
                 <div className="absolute inset-y-0 left-3 flex items-center pt-6 z-10">
                   <FaCalendarAlt className="text-gray-400" />
                 </div>
@@ -445,7 +564,9 @@ const EditSoal = () => {
               </div>
 
               <div className="relative">
-                <label className={labelClass}>Jam Berakhir (Akses Ditutup)</label>
+                <label className={labelClass}>
+                  Jam Berakhir (Akses Ditutup)
+                </label>
                 <div className="absolute inset-y-0 left-3 flex items-center pt-6 z-10">
                   <FaClock className="text-gray-400" />
                 </div>
@@ -477,16 +598,29 @@ const EditSoal = () => {
               </div>
             </div>
 
-            <div className="mt-4">
-              <label className="inline-flex items-center gap-2 text-sm text-gray-700">
-                <input
-                  type="checkbox"
-                  checked={acakSoal}
-                  onChange={() => setAcakSoal(!acakSoal)}
-                  className="h-4 w-4"
-                />
-                Acak urutan soal untuk setiap peserta
-              </label>
+            {/* Checkbox Acak */}
+            <div className="mt-4 space-y-2">
+              <div className="flex flex-col gap-3">
+                <label className="inline-flex items-center gap-2 text-sm text-gray-700">
+                  <input
+                    type="checkbox"
+                    checked={acakSoal}
+                    onChange={() => setAcakSoal(!acakSoal)}
+                    className="h-4 w-4"
+                  />
+                  Acak urutan soal untuk setiap peserta
+                </label>
+
+                <label className="inline-flex items-center gap-2 text-sm text-gray-700">
+                  <input
+                    type="checkbox"
+                    checked={acakOpsi}
+                    onChange={() => setAcakOpsi(!acakOpsi)}
+                    className="h-4 w-4"
+                  />
+                  Acak jawaban pilihan ganda untuk setiap peserta
+                </label>
+              </div>
             </div>
           </fieldset>
 
@@ -545,7 +679,6 @@ const EditSoal = () => {
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div>
                   <label className={labelClass}>Tipe Soal</label>
-                  {/* <-- PERUBAHAN DI SINI --> */}
                   <select
                     value={soal.tipeSoal}
                     onChange={(e) =>
@@ -557,7 +690,6 @@ const EditSoal = () => {
                     <option value="teksSingkat">Teks Singkat (Auto-Nilai)</option>
                     <option value="esay">Esai (Nilai Manual)</option>
                   </select>
-                  {/* <-- AKHIR PERUBAHAN --> */}
                 </div>
 
                 <div className="md:col-span-2">
@@ -625,7 +757,6 @@ const EditSoal = () => {
                 </div>
               )}
 
-              {/* <-- PERUBAHAN DI SINI (BLOK BARU) --> */}
               {/* Kunci Jawaban Teks Singkat */}
               {soal.tipeSoal === "teksSingkat" && (
                 <div className="mt-5 border-t border-gray-200 pt-4">
@@ -647,14 +778,13 @@ const EditSoal = () => {
                     required
                   />
                   <p className="text-xs text-gray-500 mt-1">
-                    Gunakan tanda <b>,</b> (tanda koma) untuk memisahkan jika
-                    ada lebih dari satu jawaban benar.
+                    Gunakan tanda <b>,</b> (tanda koma) untuk memisahkan jika ada
+                    lebih dari satu jawaban benar.
                     <br />
                     Contoh: <b>2 , dua , 2 (dua)</b>
                   </p>
                 </div>
               )}
-              {/* <-- AKHIR PERUBAHAN --> */}
             </fieldset>
           ))}
 

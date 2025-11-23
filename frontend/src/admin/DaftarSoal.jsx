@@ -6,30 +6,28 @@ import {
   FaSyncAlt,
   FaCopy,
   FaExclamationTriangle,
-  FaCheckCircle, // <-- 1. TAMBAHKAN ICON INI
+  FaCheckCircle,
 } from "react-icons/fa";
 import { useNavigate } from "react-router-dom";
 
 const API_URL = "http://localhost:5000";
 
 // ===============================================
-// ▼▼▼ KOMPONEN MODAL BARU ▼▼▼
+// ▼▼▼ KOMPONEN MODAL KONFIRMASI ▼▼▼
 // ===============================================
 const KonfirmasiModal = ({ show, message, onCancel, onConfirm }) => {
   if (!show) return null;
 
   return (
-    // Latar belakang overlay
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-[1px]">
-      {/* Konten Modal */}
       <div className="bg-white p-6 rounded-lg shadow-xl w-full max-w-sm">
         <div className="flex items-center gap-3 mb-4">
           <FaExclamationTriangle className="text-yellow-500 text-2xl" />
           <h3 className="text-lg font-semibold text-gray-800">Konfirmasi</h3>
         </div>
+
         <p className="text-gray-700 mb-6">{message}</p>
-        
-        {/* Tombol Aksi */}
+
         <div className="flex justify-end gap-3">
           <button
             onClick={onCancel}
@@ -57,14 +55,14 @@ const DaftarSoal = () => {
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
 
-  // State baru untuk modal
+  // state untuk modal konfirmasi
   const [modalState, setModalState] = useState({
     show: false,
     message: "",
     onConfirm: () => {},
   });
 
-  // 2. TAMBAHKAN STATE UNTUK TOAST
+  // toast sukses
   const [successMessage, setSuccessMessage] = useState("");
 
   // =============================
@@ -75,7 +73,9 @@ const DaftarSoal = () => {
   const toLocalDateOnly = (val) => {
     const d = new Date(val);
     if (!isNaN(d)) {
-      return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+      return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(
+        d.getDate()
+      )}`;
     }
     const s = String(val || "");
     return s.includes("T") ? s.slice(0, 10) : s;
@@ -94,41 +94,43 @@ const DaftarSoal = () => {
   const fetchUjian = async () => {
     try {
       setLoading(true);
+
       const token = sessionStorage.getItem("adminToken");
+      if (!token) throw new Error("Token tidak ditemukan. Silakan login ulang.");
+
       const res = await fetch(`${API_URL}/api/ujian`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       const data = await res.json();
+      if (!res.ok) throw new Error(data.message || "Gagal memuat daftar ujian.");
 
-      const sortedData = [...data].sort(
+      const safeArray = Array.isArray(data) ? data : [];
+      const sortedData = [...safeArray].sort(
         (a, b) => new Date(a.created_at) - new Date(b.created_at)
       );
+
       setDaftarUjian(sortedData);
     } catch (err) {
       console.error("Gagal ambil data:", err);
-      alert("Gagal memuat daftar ujian");
+      alert(err.message || "Gagal memuat daftar ujian");
     } finally {
       setLoading(false);
     }
   };
 
   // =============================================
-  // ▼▼▼ FUNGSI MODAL & AKSI (DIPERBARUI) ▼▼▼
+  // ▼▼▼ FUNGSI MODAL & AKSI ▼▼▼
   // =============================================
-  
-  // Fungsi untuk menutup modal
   const handleCloseModal = () => {
     setModalState({ show: false, message: "", onConfirm: () => {} });
   };
 
-  // Fungsi yang dipanggil saat tombol OK di modal diklik
   const handleConfirmModal = () => {
-    modalState.onConfirm(); // Jalankan fungsi yang disimpan (prosesHapus atau prosesSalin)
-    handleCloseModal(); // Tutup modal
+    modalState.onConfirm();
+    handleCloseModal();
   };
 
   // --- LOGIKA HAPUS ---
-  // 1. Ini adalah logika inti yang akan dijalankan
   const prosesHapus = async (id) => {
     try {
       const token = sessionStorage.getItem("adminToken");
@@ -143,10 +145,9 @@ const DaftarSoal = () => {
 
       const data = await res.json();
       if (!res.ok) throw new Error(data.message || "Gagal hapus ujian");
-      
-      // 4. UBAH DARI ALERT KE TOAST
+
       setSuccessMessage("Ujian berhasil dihapus");
-      setTimeout(() => setSuccessMessage(""), 3000); // Hilang setelah 3 detik
+      setTimeout(() => setSuccessMessage(""), 3000);
 
       fetchUjian();
     } catch (err) {
@@ -155,17 +156,15 @@ const DaftarSoal = () => {
     }
   };
 
-  // 2. Ini adalah fungsi yang dipanggil tombol (hanya membuka modal)
   const handleDelete = (id) => {
     setModalState({
       show: true,
       message: "Yakin ingin menghapus ujian ini?",
-      onConfirm: () => prosesHapus(id), // Simpan fungsi prosesHapus untuk dijalankan
+      onConfirm: () => prosesHapus(id),
     });
   };
 
   // --- LOGIKA SALIN ---
-  // 1. Ini adalah logika inti yang akan dijalankan
   const prosesSalin = async (ujian) => {
     try {
       const token = sessionStorage.getItem("adminToken");
@@ -209,6 +208,7 @@ const DaftarSoal = () => {
               },
             ];
 
+      // tanggal mulai baru = hari ini (atau adapt timezone)
       let localDate = new Date().toISOString().split("T")[0];
       if (detailData.tanggal && !isNaN(new Date(detailData.tanggal))) {
         const original = new Date(detailData.tanggal);
@@ -219,7 +219,7 @@ const DaftarSoal = () => {
           .split("T")[0];
       }
 
-      let localDateBerakhir = detailData.tanggal_berakhir
+      const localDateBerakhir = detailData.tanggal_berakhir
         ? toLocalDateOnly(detailData.tanggal_berakhir)
         : localDate;
 
@@ -233,12 +233,20 @@ const DaftarSoal = () => {
         }
         return `${txt} (1)`;
       };
+
       const newKeterangan = bumpOrOne(stripSalinan(detailData.keterangan || ""));
 
       const jamMulaiBaru = detailData.jam_mulai || "08:00";
       const jamBerakhirBaru = detailData.jam_berakhir || "09:00";
       const durasiBaru = detailData.durasi || 60;
       const acakSoalBaru = detailData.acak_soal || false;
+
+      // NEW: bawa juga setting acak opsi jika ada
+      const acakOpsiBaru =
+        detailData.acak_opsi ??
+        detailData.acakOpsi ??
+        detailData.acak_opsi === 1 ??
+        false;
 
       const payload = {
         keterangan: newKeterangan,
@@ -248,6 +256,7 @@ const DaftarSoal = () => {
         jamBerakhir: jamBerakhirBaru,
         durasi: durasiBaru,
         acakSoal: acakSoalBaru,
+        acakOpsi: acakOpsiBaru, // <-- PENTING
         soalList,
       };
 
@@ -263,14 +272,12 @@ const DaftarSoal = () => {
       });
 
       const copyResult = await resCopy.json();
-
       if (!resCopy.ok) {
         throw new Error(copyResult.message || "Gagal menyimpan salinan ujian");
       }
-      
-      // 4. UBAH DARI ALERT KE TOAST
+
       setSuccessMessage("Ujian berhasil disalin!");
-      setTimeout(() => setSuccessMessage(""), 3000); // Hilang setelah 3 detik
+      setTimeout(() => setSuccessMessage(""), 3000);
 
       fetchUjian();
     } catch (err) {
@@ -279,12 +286,11 @@ const DaftarSoal = () => {
     }
   };
 
-  // 2. Ini adalah fungsi yang dipanggil tombol (hanya membuka modal)
   const handleSalin = (ujian) => {
     setModalState({
       show: true,
       message: "Yakin ingin menyalin ujian ini?",
-      onConfirm: () => prosesSalin(ujian), // Simpan fungsi prosesSalin untuk dijalankan
+      onConfirm: () => prosesSalin(ujian),
     });
   };
 
@@ -296,12 +302,9 @@ const DaftarSoal = () => {
     fetchUjian();
   }, []);
 
-  // =============================
-  // RENDER
-  // =============================
   return (
     <div className="bg-gray-50 min-h-screen flex flex-col">
-      {/* 3. TAMBAHKAN BLOK TOAST DI SINI */}
+      {/* TOAST */}
       {successMessage && (
         <div className="fixed top-20 left-1/2 -translate-x-1/2 z-50">
           <div className="flex items-center gap-3 bg-green-600 text-white px-5 py-3 rounded-lg shadow-lg">
@@ -311,7 +314,7 @@ const DaftarSoal = () => {
         </div>
       )}
 
-      {/* Render Modal Konfirmasi di sini. */}
+      {/* MODAL KONFIRMASI */}
       <KonfirmasiModal
         show={modalState.show}
         message={modalState.message}
@@ -320,7 +323,6 @@ const DaftarSoal = () => {
       />
 
       {/* NAVBAR STICKY */}
-      {/* Navbar z-40, Modal z-50, Toast z-50. Ini OK. */}
       <div className="bg-white shadow-md border-b border-gray-300 px-8 py-4 flex justify-between items-center sticky top-0 z-40">
         <h2 className="text-xl font-semibold text-gray-900 flex items-center gap-2">
           <FaListUl className="text-blue-600 text-lg" />
@@ -369,6 +371,7 @@ const DaftarSoal = () => {
                   </th>
                 </tr>
               </thead>
+
               <tbody>
                 {daftarUjian.map((u, index) => (
                   <tr
@@ -378,23 +381,29 @@ const DaftarSoal = () => {
                     <td className="py-3 px-5 text-gray-700 border border-gray-200">
                       {index + 1}
                     </td>
+
                     <td className="py-3 px-5 font-medium text-gray-800 whitespace-normal break-words border border-gray-200">
                       {u.keterangan}
                     </td>
+
                     <td className="py-3 px-5 whitespace-nowrap border border-gray-200">
                       {formatTanggal(u.tanggal)}
                     </td>
+
                     <td className="py-3 px-5 whitespace-nowrap border border-gray-200">
                       {formatTanggal(u.tanggal_berakhir)}
                     </td>
+
                     <td className="py-3 px-5 whitespace-nowrap border border-gray-200">
                       {(u.jam_mulai || "--:--") +
                         " – " +
                         (u.jam_berakhir || "--:--")}
                     </td>
-                    <td className="py-3 px-5 whitespace-nowBrap border border-gray-200">
+
+                    <td className="py-3 px-5 whitespace-nowrap border border-gray-200">
                       {u.durasi ? `${u.durasi} menit` : "-"}
                     </td>
+
                     <td className="py-3 px-5 text-center border border-gray-200">
                       <div className="flex justify-center gap-3">
                         <button
@@ -404,16 +413,16 @@ const DaftarSoal = () => {
                         >
                           <FaEdit />
                         </button>
+
                         <button
-                          // Panggil handleSalin (pembuka modal), bukan prosesSalin
                           onClick={() => handleSalin(u)}
                           className="text-green-600 hover:text-green-800 transition"
                           title="Salin Ujian"
                         >
                           <FaCopy />
                         </button>
+
                         <button
-                          // Panggil handleDelete (pembuka modal), bukan prosesHapus
                           onClick={() => handleDelete(u.id)}
                           className="text-red-500 hover:text-red-700 transition"
                           title="Hapus Ujian"

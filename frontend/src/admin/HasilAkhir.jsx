@@ -1,7 +1,7 @@
 // File: src/admin/HasilAkhir.jsx (Diperbarui dengan Headers Otorisasi)
 
 import React, { useEffect, useState } from "react";
-import { useParams, Link } from "react-router-dom";
+import { useParams, Link, useLocation, useNavigate } from "react-router-dom";
 import {
   FaFileAlt,
   FaSyncAlt,
@@ -192,6 +192,9 @@ const DetailSoalModal = ({ soal, nomorSoal, onClose }) => {
 // Komponen HasilAkhir
 const HasilAkhir = () => {
   const { id: pesertaId } = useParams();
+  const location = useLocation();
+  const navigate = useNavigate();
+  const targetAdminId = location.state?.targetAdminId;
   const [peserta, setPeserta] = useState(null);
   const [hasil, setHasil] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -223,13 +226,12 @@ const HasilAkhir = () => {
         if (!resPeserta.ok) throw new Error(dataPeserta.message);
         setPeserta(dataPeserta);
 
-        // ▼▼▼ PERUBAHAN: Tambahkan 'headers' ke fetch hasil ▼▼▼
-        // Ambil hasil ujian (Dilindungi, perlu token)
-        const resHasil = await fetch(
-          `${API_URL}/api/hasil/peserta/${pesertaId}`,
-          { headers } // <-- Tambahkan headers di sini
-        );
-        // ▲▲▲ AKHIR PERUBAHAN ▲▲▲
+        let url = `${API_URL}/api/hasil/peserta/${pesertaId}`;
+        if (targetAdminId) {
+          url += `?target_admin_id=${targetAdminId}`;
+        }
+
+        const resHasil = await fetch(url, { headers });
 
         const dataHasil = await resHasil.json();
         if (!resHasil.ok) throw new Error(dataHasil.message);
@@ -249,7 +251,7 @@ const HasilAkhir = () => {
     };
 
     fetchDetail();
-  }, [pesertaId]);
+  }, [pesertaId, targetAdminId]);
 
   // Kalkulasi skor (Tidak berubah)
   const pgAnswers = hasil.filter(
@@ -306,12 +308,18 @@ const HasilAkhir = () => {
           <FaFileAlt className="text-blue-600" />
           Detail Hasil Ujian
         </h2>
-        <Link
-          to="/admin/hasil-ujian"
+        <button
+          onClick={() => {
+            if (targetAdminId) {
+              navigate(-1); // Jika dari Super Admin, kembali ke halaman sebelumnya (history)
+            } else {
+              navigate("/admin/hasil-ujian"); // Jika admin biasa, kembali ke daftar hasil
+            }
+          }}
           className="flex items-center gap-2 px-3 py-2 bg-gray-200 text-gray-700 rounded-md hover:bg-gray-300 transition"
         >
           &larr; Kembali
-        </Link>
+        </button>
       </div>
 
       {/* KONTEN (Area) */}

@@ -1,7 +1,4 @@
-// File: src/admin/HasilUjian.jsx
-// (UI diperbarui: header elegan, dropdown pilih ujian, search, sorting, pagination,
-//  progress bar nilai, ringkasan statistik, 1 tombol "Export Semua" + "Export Ujian Ini")
-// UPDATE: Super Admin hanya melihat ujian miliknya sendiri (ujian admin biasa tidak masuk).
+// File: src/admin/AksesDaftarAdmin/TabHasilAdmin.jsx
 
 import React, { useEffect, useState, useCallback, useMemo } from "react";
 import { Link } from "react-router-dom";
@@ -25,7 +22,7 @@ import * as XLSX from "xlsx";
 
 const API_URL = "http://localhost:5000";
 
-// ---------- Helpers ----------
+// ---------- Helpers (Sama persis dengan HasilUjian.jsx) ----------
 const formatTanggal = (isoString) => {
   if (!isoString) return "-";
   try {
@@ -41,62 +38,6 @@ const formatTanggal = (isoString) => {
   } catch {
     return isoString;
   }
-};
-
-// ---------- Auth helpers (untuk scope superadmin) ----------
-const decodeJwt = (token) => {
-  try {
-    const payload = token.split(".")[1];
-    const base64 = payload.replace(/-/g, "+").replace(/_/g, "/");
-    const json = decodeURIComponent(
-      atob(base64)
-        .split("")
-        .map((c) => "%" + ("00" + c.charCodeAt(0).toString(16)).slice(-2))
-        .join("")
-    );
-    return JSON.parse(json);
-  } catch {
-    return null;
-  }
-};
-
-const isSuperAdminRole = (role) => {
-  const r = (role || "").toLowerCase();
-  return ["superadmin", "super_admin", "super-admin", "super"].includes(r);
-};
-
-const getAdminContext = () => {
-  // prioritas: adminData dari login
-  const stored = sessionStorage.getItem("adminData");
-  if (stored) {
-    try {
-      const admin = JSON.parse(stored);
-      return {
-        role:
-          admin.role || admin.level || admin.tipe || admin.user_role || null,
-        adminId: admin.id || admin.admin_id || admin.userId || null,
-      };
-    } catch {}
-  }
-
-  // fallback: decode token
-  const token = sessionStorage.getItem("adminToken");
-  if (!token) return { role: null, adminId: null };
-  const payload = decodeJwt(token) || {};
-  return {
-    role:
-      payload.role ||
-      payload.level ||
-      payload.tipe ||
-      payload.user_role ||
-      null,
-    adminId:
-      payload.id ||
-      payload.admin_id ||
-      payload.userId ||
-      payload.uid ||
-      null,
-  };
 };
 
 // Grouping by exam -> peserta
@@ -177,8 +118,8 @@ const barColor = (v) => {
   return "bg-red-500";
 };
 
-// ---------- Component ----------
-const HasilUjian = () => {
+// ---------- Component Utama ----------
+const TabHasilAdmin = ({ adminId }) => {
   const [groupedHasil, setGroupedHasil] = useState({});
   const [rawData, setRawData] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -191,29 +132,21 @@ const HasilUjian = () => {
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(25);
 
+  // --- FETCH DATA (Dimodifikasi untuk Admin Tertentu) ---
   const fetchData = useCallback(async () => {
+    if (!adminId) return; // Cek ID
     setLoading(true);
     try {
       const token = sessionStorage.getItem("adminToken");
-      const { role, adminId } = getAdminContext();
-      const isSuperAdmin = isSuperAdminRole(role);
-
-      // ✅ jika superadmin, batasi ke ujian miliknya sendiri via query param backend
-      const url =
-        isSuperAdmin && adminId
-          ? `${API_URL}/api/hasil?target_admin_id=${encodeURIComponent(
-              adminId
-            )}`
-          : `${API_URL}/api/hasil`;
-
-      const res = await fetch(url, {
+      // PERUBAHAN DI SINI: Tambahkan parameter target_admin_id
+      const res = await fetch(`${API_URL}/api/hasil?target_admin_id=${adminId}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
 
       if (res.status === 401) {
         setRawData([]);
         setGroupedHasil({});
-        throw new Error("401 Unauthorized. Pastikan token admin valid.");
+        throw new Error("401 Unauthorized.");
       }
 
       const data = await res.json();
@@ -222,19 +155,17 @@ const HasilUjian = () => {
       setGroupedHasil(groupedData);
     } catch (err) {
       console.error(err);
-      alert(
-        err?.message || "Gagal memuat hasil ujian. Silakan cek konsol/log."
-      );
+      // Optional: alert(err?.message);
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [adminId]);
 
   useEffect(() => {
     fetchData();
   }, [fetchData]);
 
-  // auto select first exam after load
+  // Auto select first exam after load
   useEffect(() => {
     if (!selectedExamId && Object.keys(groupedHasil).length > 0) {
       const firstExamId = Object.keys(groupedHasil)[0];
@@ -264,7 +195,7 @@ const HasilUjian = () => {
     return `https://wa.me/${formattedNohp}`;
   };
 
-  // ---------- Export ----------
+  // ---------- Export Logic (Sama Persis) ----------
   const handleExportAll = () => {
     setLoading(true);
     try {
@@ -275,12 +206,7 @@ const HasilUjian = () => {
         const summaryData = prepareDataForExport(groupData.list_peserta);
         const wsSummary = XLSX.utils.json_to_sheet(summaryData);
         wsSummary["!cols"] = [
-          { wch: 30 },
-          { wch: 20 },
-          { wch: 30 },
-          { wch: 20 },
-          { wch: 15 },
-          { wch: 15 },
+          { wch: 30 }, { wch: 20 }, { wch: 30 }, { wch: 20 }, { wch: 15 }, { wch: 15 },
         ];
         const summarySheetName = sanitizeSheetName(
           `R - ${groupData.keterangan?.substring(0, 20) || "Ujian"} (ID ${examId})`
@@ -289,9 +215,7 @@ const HasilUjian = () => {
 
         // Detail
         const numericExamId = parseInt(examId, 10);
-        const detailData = rawData.filter(
-          (row) => row.exam_id === numericExamId
-        );
+        const detailData = rawData.filter((row) => row.exam_id === numericExamId);
         if (detailData.length > 0) {
           const detailToExport = detailData.map((row) => ({
             "Nama Peserta": row.nama,
@@ -306,15 +230,7 @@ const HasilUjian = () => {
           }));
           const wsDetail = XLSX.utils.json_to_sheet(detailToExport);
           wsDetail["!cols"] = [
-            { wch: 30 },
-            { wch: 20 },
-            { wch: 30 },
-            { wch: 20 },
-            { wch: 50 },
-            { wch: 15 },
-            { wch: 30 },
-            { wch: 10 },
-            { wch: 30 },
+            { wch: 30 }, { wch: 20 }, { wch: 30 }, { wch: 20 }, { wch: 50 }, { wch: 15 }, { wch: 30 }, { wch: 10 }, { wch: 30 },
           ];
           const detailSheetName = sanitizeSheetName(
             `D - ${groupData.keterangan?.substring(0, 20) || "Ujian"} (ID ${examId})`
@@ -323,10 +239,10 @@ const HasilUjian = () => {
         }
       });
 
-      XLSX.writeFile(wb, "Rekap Semua Ujian (Lengkap).xlsx");
+      XLSX.writeFile(wb, `Rekap_Semua_Ujian_Admin_${adminId}.xlsx`);
     } catch (error) {
       console.error("Gagal mengekspor semua data Excel:", error);
-      alert("Gagal mengekspor data. Cek konsol untuk detail.");
+      alert("Gagal mengekspor data.");
     } finally {
       setLoading(false);
     }
@@ -341,20 +257,13 @@ const HasilUjian = () => {
       const summaryData = prepareDataForExport(groupData.list_peserta);
       const wsSummary = XLSX.utils.json_to_sheet(summaryData);
       wsSummary["!cols"] = [
-        { wch: 30 },
-        { wch: 20 },
-        { wch: 30 },
-        { wch: 20 },
-        { wch: 15 },
-        { wch: 15 },
+        { wch: 30 }, { wch: 20 }, { wch: 30 }, { wch: 20 }, { wch: 15 }, { wch: 15 },
       ];
       XLSX.utils.book_append_sheet(wb, wsSummary, "Ringkasan");
 
       // Detail
       const numericExamId = parseInt(examId, 10);
-      const detailData = rawData.filter(
-        (row) => row.exam_id === numericExamId
-      );
+      const detailData = rawData.filter((row) => row.exam_id === numericExamId);
 
       if (detailData.length === 0) {
         alert("Gagal menemukan data detail. Coba refresh halaman.");
@@ -374,26 +283,18 @@ const HasilUjian = () => {
       }));
       const wsDetail = XLSX.utils.json_to_sheet(detailToExport);
       wsDetail["!cols"] = [
-        { wch: 30 },
-        { wch: 20 },
-        { wch: 30 },
-        { wch: 20 },
-        { wch: 50 },
-        { wch: 15 },
-        { wch: 30 },
-        { wch: 10 },
-        { wch: 30 },
+        { wch: 30 }, { wch: 20 }, { wch: 30 }, { wch: 20 }, { wch: 50 }, { wch: 15 }, { wch: 30 }, { wch: 10 }, { wch: 30 },
       ];
       XLSX.utils.book_append_sheet(wb, wsDetail, "Detail Jawaban");
 
-      XLSX.writeFile(wb, `Hasil Ujian - ${safeFileName}.xlsx`);
+      XLSX.writeFile(wb, `Hasil_${safeFileName}_Admin_${adminId}.xlsx`);
     } catch (error) {
       console.error("Gagal mengekspor data gabungan:", error);
       alert("Gagal mengekspor data.");
     }
   };
 
-  // ---------- Derived ----------
+  // ---------- Derived State (Stats, Filter, Sort, Pagination) ----------
   const selectedGroup = selectedExamId ? groupedHasil[selectedExamId] : null;
 
   const stats = useMemo(() => {
@@ -402,13 +303,9 @@ const HasilUjian = () => {
     const count = list.length;
     const avg =
       count > 0
-        ? Math.round(
-            list.reduce((a, b) => a + Number(b.skor_pg || 0), 0) / count
-          )
+        ? Math.round(list.reduce((a, b) => a + Number(b.skor_pg || 0), 0) / count)
         : 0;
-    const last = list[0]?.submitted_at
-      ? formatTanggal(list[0].submitted_at)
-      : "-";
+    const last = list[0]?.submitted_at ? formatTanggal(list[0].submitted_at) : "-";
     return { count, avg, lastSubmit: last };
   }, [selectedGroup]);
 
@@ -438,7 +335,9 @@ const HasilUjian = () => {
           return (Number(a.pg_benar) - Number(b.pg_benar)) * dir;
         case "submitted_at":
         default:
-          return (new Date(a.submitted_at) - new Date(b.submitted_at)) * dir;
+          return (
+            (new Date(a.submitted_at) - new Date(b.submitted_at)) * dir
+          );
       }
     });
 
@@ -478,24 +377,25 @@ const HasilUjian = () => {
   if (loading) {
     return (
       <div className="flex justify-center items-center h-64 text-gray-500">
-        <FaSyncAlt className="animate-spin mr-2" /> Memuat data...
+        <FaSyncAlt className="animate-spin mr-2" /> Memuat hasil ujian...
       </div>
     );
   }
 
   if (Object.keys(groupedHasil).length === 0) {
     return (
-      <div className="flex flex-col items-center justify-center h-64 text-gray-500">
-        <FaExclamationCircle className="text-4xl mb-3" />
-        <span className="text-lg">Belum ada hasil ujian yang masuk.</span>
+      <div className="flex flex-col items-center justify-center h-64 text-gray-500 border-2 border-dashed border-gray-200 rounded-xl">
+        <FaExclamationCircle className="text-4xl mb-3 text-gray-300" />
+        <span className="text-lg">Belum ada hasil ujian dari admin ini.</span>
       </div>
     );
   }
 
   return (
-    <div className="bg-gray-50 min-h-screen flex flex-col">
+    // [UBAH] Menghapus min-h-screen dan mengganti menjadi w-full agar fit di tab
+    <div className="bg-gray-50 w-full flex flex-col rounded-lg overflow-hidden border border-gray-200">
       {/* HEADER */}
-      <div className="bg-white shadow-sm border-b border-gray-200 px-6 md:px-8 py-4 flex flex-col md:flex-row md:items-center md:justify-between gap-3 sticky top-0 z-50">
+      <div className="bg-white shadow-sm border-b border-gray-200 px-6 md:px-8 py-4 flex flex-col md:flex-row md:items-center md:justify-between gap-3 sticky top-0 z-30">
         <div className="flex items-center gap-3">
           <div className="p-2 rounded-lg bg-blue-50 text-blue-600">
             <FaPoll />
@@ -505,7 +405,7 @@ const HasilUjian = () => {
               Rekap Hasil Ujian
             </h2>
             <p className="text-sm text-gray-500">
-              Lihat ringkasan nilai peserta dan ekspor data ke Excel.
+              Lihat ringkasan nilai peserta dan ekspor data.
             </p>
           </div>
         </div>
@@ -513,13 +413,13 @@ const HasilUjian = () => {
         <div className="flex items-center gap-2">
           <button
             onClick={handleExportAll}
-            className="flex items-center gap-2 px-3 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition"
+            className="flex items-center gap-2 px-3 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition text-sm"
           >
             <FaFileExcel /> Export Semua
           </button>
           <button
             onClick={fetchData}
-            className="flex items-center gap-2 px-3 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition"
+            className="flex items-center gap-2 px-3 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition text-sm"
           >
             <FaSyncAlt /> Refresh
           </button>
@@ -527,7 +427,7 @@ const HasilUjian = () => {
       </div>
 
       {/* FILTER BAR */}
-      <div className="p-6 pt-4">
+      <div className="p-6 pt-4 bg-gray-50">
         <div className="bg-white border border-gray-200 rounded-xl p-4 md:p-5 shadow-sm">
           <div className="flex flex-col lg:flex-row lg:items-end gap-4">
             {/* Dropdown Ujian */}
@@ -538,7 +438,7 @@ const HasilUjian = () => {
               <select
                 value={selectedExamId || ""}
                 onChange={(e) => setSelectedExamId(e.target.value)}
-                className="w-full border border-gray-300 rounded-md p-2.5 text-gray-800 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full border border-gray-300 rounded-md p-2.5 text-gray-800 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
               >
                 {Object.entries(groupedHasil).map(([examId, groupData]) => (
                   <option key={examId} value={examId}>
@@ -559,7 +459,7 @@ const HasilUjian = () => {
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
                   placeholder="Cari nama, email, atau nomor HP..."
-                  className="w-full pl-10 pr-3 py-2.5 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full pl-10 pr-3 py-2.5 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
                 />
               </div>
             </div>
@@ -568,10 +468,8 @@ const HasilUjian = () => {
             {selectedGroup && (
               <div className="flex items-end">
                 <button
-                  onClick={() =>
-                    handleExportCombined(selectedExamId, selectedGroup)
-                  }
-                  className="h-[42px] flex items-center gap-2 px-3 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition"
+                  onClick={() => handleExportCombined(selectedExamId, selectedGroup)}
+                  className="h-[42px] flex items-center gap-2 px-3 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition text-sm"
                 >
                   <FaFileExcel /> Export Ujian Ini
                 </button>
@@ -584,14 +482,10 @@ const HasilUjian = () => {
             <div className="mt-4 grid grid-cols-1 sm:grid-cols-3 gap-3">
               <div className="p-3 rounded-lg border bg-gray-50">
                 <div className="text-xs text-gray-500">Total Peserta</div>
-                <div className="text-xl font-semibold text-gray-900">
-                  {stats.count}
-                </div>
+                <div className="text-xl font-semibold text-gray-900">{stats.count}</div>
               </div>
               <div className="p-3 rounded-lg border bg-gray-50">
-                <div className="text-xs text-gray-500">
-                  Rata-rata Nilai (PG)
-                </div>
+                <div className="text-xs text-gray-500">Rata-rata Nilai (PG)</div>
                 <div className="flex items-center gap-2">
                   <span
                     className={`inline-flex items-center px-2 py-1 border rounded-md text-sm font-semibold ${badgeColor(
@@ -610,9 +504,7 @@ const HasilUjian = () => {
               </div>
               <div className="p-3 rounded-lg border bg-gray-50">
                 <div className="text-xs text-gray-500">Submit Terakhir</div>
-                <div className="text-sm font-medium text-gray-800">
-                  {stats.lastSubmit}
-                </div>
+                <div className="text-sm font-medium text-gray-800">{stats.lastSubmit}</div>
               </div>
             </div>
           )}
@@ -621,14 +513,17 @@ const HasilUjian = () => {
 
       {/* TABLE CARD */}
       {selectedGroup ? (
-        <div className="px-6 pb-8">
+        <div className="px-6 pb-8 bg-gray-50">
           <div className="bg-white rounded-xl shadow-sm border border-gray-200">
             {/* Table controls */}
             <div className="px-4 md:px-5 py-3 flex flex-col md:flex-row md:items-center md:justify-between gap-3 border-b">
               <div className="text-sm text-gray-600 flex items-center gap-2">
                 <FaInfoCircle className="text-gray-400" />
                 Menampilkan{" "}
-                <span className="font-semibold">{pageData.length}</span> dari{" "}
+                <span className="font-semibold">
+                  {pageData.length}
+                </span>{" "}
+                dari{" "}
                 <span className="font-semibold">
                   {filteredSorted.length}
                 </span>{" "}
@@ -652,7 +547,7 @@ const HasilUjian = () => {
             {/* Table */}
             <div className="overflow-x-auto">
               <table className="min-w-full text-sm text-left border-collapse">
-                <thead className="bg-gray-50 text-gray-700 uppercase text-xs sticky top-[var(--table-sticky,0)]">
+                <thead className="bg-gray-50 text-gray-700 uppercase text-xs sticky top-0 z-20">
                   <tr>
                     <th
                       onClick={() => toggleSort("nama")}
@@ -699,9 +594,7 @@ const HasilUjian = () => {
                       </td>
                       <td className="py-3 px-5 whitespace-nowrap">
                         <div className="flex items-center justify-between gap-3">
-                          <span className="text-gray-700">
-                            {peserta.nohp || "-"}
-                          </span>
+                          <span className="text-gray-700">{peserta.nohp || "-"}</span>
                           {peserta.nohp && (
                             <a
                               href={formatWhatsappURL(peserta.nohp)}
@@ -754,10 +647,7 @@ const HasilUjian = () => {
                               style={{
                                 width: `${Math.min(
                                   100,
-                                  Math.max(
-                                    0,
-                                    Number(peserta.skor_pg || 0)
-                                  )
+                                  Math.max(0, Number(peserta.skor_pg || 0))
                                 )}%`,
                               }}
                             />
@@ -767,6 +657,7 @@ const HasilUjian = () => {
                       <td className="py-3 px-5 text-center">
                         <Link
                           to={`/admin/hasil/${peserta.peserta_id}`}
+                          state={{ targetAdminId: adminId }}
                           className="inline-flex items-center justify-center w-8 h-8 rounded-md text-blue-600 hover:bg-blue-50 hover:text-blue-800"
                           title="Lihat detail jawaban"
                         >
@@ -778,10 +669,7 @@ const HasilUjian = () => {
 
                   {pageData.length === 0 && (
                     <tr>
-                      <td
-                        colSpan={7}
-                        className="py-8 text-center text-gray-500"
-                      >
+                      <td colSpan={7} className="py-8 text-center text-gray-500">
                         Tidak ada data yang cocok dengan pencarian.
                       </td>
                     </tr>
@@ -791,24 +679,23 @@ const HasilUjian = () => {
             </div>
 
             {/* Pagination */}
-            <div className="px-4 md:px-5 py-3 border-t flex items-center justify-between">
+            <div className="px-4 md:px-5 py-3 border-t flex items-center justify-between bg-white">
               <div className="text-sm text-gray-600">
-                Halaman{" "}
-                <span className="font-semibold">{currentPage}</span> dari{" "}
+                Halaman <span className="font-semibold">{currentPage}</span> dari{" "}
                 <span className="font-semibold">{totalPages}</span>
               </div>
               <div className="flex items-center gap-2">
                 <button
                   onClick={() => setPage((p) => Math.max(1, p - 1))}
                   disabled={currentPage === 1}
-                  className="inline-flex items-center gap-2 px-3 py-2 border rounded-md text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="inline-flex items-center gap-2 px-3 py-2 border rounded-md text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed text-sm"
                 >
                   <FaChevronLeft /> Prev
                 </button>
                 <button
                   onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
                   disabled={currentPage === totalPages}
-                  className="inline-flex items-center gap-2 px-3 py-2 border rounded-md text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="inline-flex items-center gap-2 px-3 py-2 border rounded-md text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed text-sm"
                 >
                   Next <FaChevronRight />
                 </button>
@@ -825,4 +712,4 @@ const HasilUjian = () => {
   );
 };
 
-export default HasilUjian;
+export default TabHasilAdmin;

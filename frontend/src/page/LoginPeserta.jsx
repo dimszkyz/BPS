@@ -15,6 +15,40 @@ const LoginPeserta = () => {
   const [bgUrl, setBgUrl] = useState("");
   const [bgLoading, setBgLoading] = useState(true);
 
+  // --- LOGIKA AUTO-REDIRECT (BARU) ---
+  useEffect(() => {
+    // 1. Cek apakah ada data login tersimpan
+    const loginDataStr = localStorage.getItem("loginPeserta");
+    const pesertaDataStr = localStorage.getItem("pesertaData");
+
+    if (loginDataStr) {
+      try {
+        const loginData = JSON.parse(loginDataStr);
+        
+        // Jika data login valid dan punya ID Ujian
+        if (loginData && loginData.examId) {
+          
+          // 2. Cek Level Akses
+          if (pesertaDataStr) {
+            // Level 2: Sudah Login + Sudah Isi Data Diri -> Langsung ke Ujian
+            console.log("Sesi ditemukan, mengarahkan kembali ke ujian...");
+            navigate(`/ujian/${loginData.examId}`, { replace: true });
+          } else {
+            // Level 1: Sudah Login tapi Belum Isi Data -> Ke Form Data Diri
+            console.log("Sesi login ditemukan, mengarahkan ke pengisian data...");
+            navigate("/peserta", { replace: true });
+          }
+        }
+      } catch (e) {
+        // Jika JSON error, hapus storage agar bersih
+        console.error("Data storage korup, mereset sesi.", e);
+        localStorage.removeItem("loginPeserta");
+        localStorage.removeItem("pesertaData");
+      }
+    }
+  }, [navigate]);
+  // --- SELESAI LOGIKA BARU ---
+
   useEffect(() => {
     const fetchBgSetting = async () => {
       try {
@@ -66,6 +100,7 @@ const LoginPeserta = () => {
         throw new Error(data.message || "Gagal login.");
       }
 
+      // Reset data lama jika login baru dilakukan manual
       localStorage.removeItem("pesertaData");
 
       localStorage.setItem(

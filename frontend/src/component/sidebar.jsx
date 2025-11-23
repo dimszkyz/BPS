@@ -1,4 +1,5 @@
-// File: src/component/sidebar.jsx (PERBAIKAN)
+// File: src/component/sidebar.jsx (FINAL: admin pakai inisial, superadmin tanpa avatar)
+
 import React, { useState, useEffect } from 'react';
 import { NavLink } from 'react-router-dom';
 import {
@@ -11,6 +12,8 @@ import {
   FaPoll,
   FaExclamationTriangle,
   FaSpinner,
+  FaUserShield,
+  FaKey,
 } from 'react-icons/fa';
 import { jwtDecode } from 'jwt-decode';
 
@@ -20,18 +23,15 @@ const Sidebar = () => {
   const [showLogoutModal, setShowLogoutModal] = useState(false);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
 
-  // ▼▼▼ 1. PERBAIKI FUNGSI LOGOUT ▼▼▼
   const forceLogout = () => {
-    sessionStorage.removeItem("adminToken");    // <-- GANTI KE sessionStorage
-    sessionStorage.removeItem("adminData");     // <-- GANTI KE sessionStorage
-    sessionStorage.removeItem("newHasilUjian"); // (Ini Anda salah ketik, ganti ke sessionStorage juga)
-    // localStorage.removeItem("newHasilUjian"); // Hapus baris ini
+    sessionStorage.removeItem("adminToken");
+    sessionStorage.removeItem("adminData");
+    sessionStorage.removeItem("newHasilUjian");
     window.location.href = "/admin/login";
   };
 
   useEffect(() => {
-    // ▼▼▼ 2. PERBAIKI PENGECEKAN TOKEN ▼▼▼
-    const token = sessionStorage.getItem("adminToken"); // <-- GANTI KE sessionStorage
+    const token = sessionStorage.getItem("adminToken");
 
     if (!token) {
       forceLogout();
@@ -48,13 +48,10 @@ const Sidebar = () => {
         return;
       }
 
-      // ▼▼▼ 3. PERBAIKI LOGIKA HASIL UJIAN ▼▼▼
-      // (Asumsi item ini juga harusnya ada di sessionStorage)
-      const newResult = sessionStorage.getItem("newHasilUjian") === "true"; // <-- GANTI KE sessionStorage
+      const newResult = sessionStorage.getItem("newHasilUjian") === "true";
       if (newResult) setHasNewResult(true);
 
-      // ▼▼▼ 4. PERBAIKI PENGAMBILAN DATA ADMIN ▼▼▼
-      const storedAdmin = JSON.parse(sessionStorage.getItem("adminData") || "{}"); // <-- GANTI KE sessionStorage
+      const storedAdmin = JSON.parse(sessionStorage.getItem("adminData") || "{}");
       setAdminData({
         username: storedAdmin.username || "Nama Admin",
         email: storedAdmin.email || "admin@example.com",
@@ -65,7 +62,7 @@ const Sidebar = () => {
       console.error("Token tidak valid:", error);
       forceLogout();
     }
-  }, []); 
+  }, []);
 
   const getNavLinkClass = ({ isActive }) => {
     const baseClasses =
@@ -77,7 +74,7 @@ const Sidebar = () => {
 
   const handleHasilUjianClick = () => {
     if (hasNewResult) {
-      sessionStorage.removeItem("newHasilUjian"); // <-- GANTI KE sessionStorage
+      sessionStorage.removeItem("newHasilUjian");
       setHasNewResult(false);
     }
   };
@@ -85,12 +82,16 @@ const Sidebar = () => {
   const handleLogout = () => {
     setIsLoggingOut(true);
     setTimeout(() => {
-      forceLogout(); 
+      forceLogout();
     }, 1200);
   };
 
-  // ... sisa kode (bagian return <>) TIDAK PERLU DIUBAH ...
-  // Salin saja sisa kode render (return) dari file asli Anda
+  // ✅ Ambil huruf depan dari username utk avatar inisial admin biasa
+  const getInitial = (name = "") => {
+    const t = (name || "").trim();
+    return t ? t[0].toUpperCase() : "A";
+  };
+
   return (
     <>
       <div className="w-64 h-screen bg-white border-r border-gray-200 flex flex-col shadow-md">
@@ -119,7 +120,7 @@ const Sidebar = () => {
             </ul>
           </div>
 
-          {/* Manajemen Soal */}
+          {/* Manajemen Ujian */}
           <div>
             <h3 className="px-2 text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">
               Manajemen Ujian
@@ -164,45 +165,81 @@ const Sidebar = () => {
                     <span
                       className="w-2.5 h-2.5 bg-red-500 rounded-full ml-auto animate-pulse"
                       title="Ada hasil ujian baru"
-                    ></span>
+                    />
                   )}
                 </NavLink>
               </li>
             </ul>
           </div>
 
-          {/* Sistem (khusus Superadmin) */}
-          {adminData.role === "superadmin" && (
-            <div>
-              <h3 className="px-2 text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">
-                Sistem
-              </h3>
-              <ul className="space-y-1">
-                <li>
-                  <NavLink to="/admin/pengaturan" className={getNavLinkClass}>
-                    <FaCog className="w-5 h-5" />
-                    <span>Pengaturan</span>
-                  </NavLink>
-                </li>
-              </ul>
-            </div>
-          )}
+          {/* Sistem (untuk semua admin) */}
+          <div>
+            <h3 className="px-2 text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">
+              Sistem
+            </h3>
+            <ul className="space-y-1">
+              {/* KHUSUS SUPERADMIN */}
+              {adminData.role === "superadmin" && (
+                <>
+                  <li>
+                    <NavLink to="/admin/daftar-admin" className={getNavLinkClass}>
+                      <FaUserShield className="w-5 h-5" />
+                      <span>Akses Daftar Admin</span>
+                    </NavLink>
+                  </li>
+
+                  <li>
+                    <NavLink to="/admin/tambah-admin" className={getNavLinkClass}>
+                      <FaUserPlus className="w-5 h-5" />
+                      <span>Tambah Admin</span>
+                    </NavLink>
+                  </li>
+                </>
+              )}
+
+              {/* UNTUK SEMUA ROLE */}
+              <li>
+                <NavLink to="/admin/ubah-password" className={getNavLinkClass}>
+                  <FaKey className="w-5 h-5" />
+                  <span>Ubah Password</span>
+                </NavLink>
+              </li>
+            </ul>
+          </div>
         </nav>
 
         {/* Bagian bawah sidebar */}
         <div className="mt-auto bg-gray-50 border-t border-gray-200 p-4 space-y-3">
-          <div className="flex items-center space-x-3 cursor-pointer group">
-            <img
-              className="w-9 h-9 rounded-full object-cover ring-1 ring-gray-300 group-hover:ring-indigo-500 transition-all duration-150"
-              src="https://via.placeholder.com/100" // Anda bisa ganti ini nanti
-              alt="Profil"
-            />
+          <div className="flex items-center gap-3">
+            {/* ✅ Inisial hanya untuk admin biasa */}
+            {adminData.role !== "superadmin" && (
+              <div
+                className="w-9 h-9 rounded-full bg-indigo-600 text-white flex items-center justify-center font-semibold text-sm ring-1 ring-indigo-700/60"
+                title={adminData.username}
+              >
+                {getInitial(adminData.username)}
+              </div>
+            )}
+
             <div className="flex-1 min-w-0">
-              <p className="font-medium text-gray-800 text-sm truncate group-hover:text-indigo-700">
+              <p className="font-medium text-gray-800 text-sm truncate">
                 {adminData.username}
               </p>
-              <p className="text-xs text-gray-500 truncate">{adminData.email}</p>
+              <p className="text-xs text-gray-500 truncate">
+                {adminData.email}
+              </p>
             </div>
+
+            {/* ✅ Icon pengaturan di kanan, hanya superadmin */}
+            {adminData.role === "superadmin" && (
+              <NavLink
+                to="/admin/pengaturan"
+                className="p-2 rounded-lg text-gray-500 hover:text-indigo-700 hover:bg-indigo-50 transition"
+                title="Pengaturan"
+              >
+                <FaCog className="w-5 h-5" />
+              </NavLink>
+            )}
           </div>
 
           <button

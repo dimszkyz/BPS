@@ -1,4 +1,4 @@
-// File: src/admin/Pengaturan.jsx (DIPERBARUI)
+// File: src/admin/Pengaturan.jsx (DIPERBARUI - Manajemen Admin dihapus)
 
 import React, { useState, useEffect, useCallback } from "react";
 import {
@@ -10,11 +10,9 @@ import {
   FaSpinner,
   FaFileImage,
   FaFont,
-  FaUsers,
   FaPaintBrush,
 } from "react-icons/fa";
 import ImageUploadBox from "./ImageUploadBox";
-import TambahAdmin from "./TambahAdmin";
 
 const API_URL = "http://localhost:5000";
 
@@ -62,9 +60,6 @@ const Pengaturan = () => {
   const [isSaving, setIsSaving] = useState(false);
   const [msg, setMsg] = useState({ type: "", text: "" });
 
-  // BARU: State untuk section aktif dipindahkan ke atas
-  const [activeSection, setActiveSection] = useState("admin");
-
   // Default background kelas untuk placeholder
   const defaultBgAdmin = "bg-gray-50";
   const defaultBgPeserta = "bg-gray-50";
@@ -102,57 +97,6 @@ const Pengaturan = () => {
       return () => clearTimeout(t);
     }
   }, [msg]);
-
-  // BARU: Efek untuk IntersectionObserver
-  // Ini akan memantau bagian mana yang terlihat saat di-scroll
-  useEffect(() => {
-    // Tunda eksekusi sedikit agar DOM (terutama <section id="...">)
-    // benar-benar selesai di-render setelah loading.
-    const timer = setTimeout(() => {
-      const sections = [
-        document.getElementById("admin-section"),
-        document.getElementById("tampilan-section"),
-      ];
-
-      // Pastikan semua section ditemukan
-      if (sections.some((sec) => !sec)) {
-        console.warn("IntersectionObserver: Tidak semua section ditemukan.");
-        return;
-      }
-
-      // Opsi:
-      // rootMargin: "-100px 0px -50% 0px"
-      // - "-100px" dari 'top': Anggap section aktif saat berada 100px di bawah atas layar (untuk memberi ruang pada header sticky)
-      // - "-50%" dari 'bottom': Batasi area deteksi hanya di 50% bagian atas layar.
-      const options = {
-        root: null, // viewport
-        rootMargin: "-100px 0px -50% 0px",
-        threshold: 0, // Picu segera setelah bersinggungan
-      };
-
-      const callback = (entries) => {
-        entries.forEach((entry) => {
-          if (entry.isIntersecting) {
-            // "admin-section" -> "admin"
-            const newActiveSection = entry.target.id.split("-")[0];
-            setActiveSection(newActiveSection);
-          }
-        });
-      };
-
-      const observer = new IntersectionObserver(callback, options);
-      sections.forEach((sec) => observer.observe(sec));
-
-      // Cleanup
-      return () => {
-        sections.forEach((sec) => sec && observer.unobserve(sec));
-        observer.disconnect();
-      };
-    }, 100); // 100ms delay
-
-    return () => clearTimeout(timer);
-    
-  }, [isLoading]); // <-- Jalankan observer ini setelah loading selesai
 
   // Simpan pengaturan tampilan
   const handleSave = async (e) => {
@@ -233,74 +177,21 @@ const Pengaturan = () => {
     );
   }
 
-  // Definisikan style di luar return agar tidak dibuat ulang setiap render
-  const baseStyle =
-    "inline-flex items-center gap-2 px-3 py-1.5 text-sm rounded-lg border";
-  const activeStyle =
-    "border-indigo-200 text-indigo-700 bg-indigo-50 hover:bg-indigo-100";
-  const inactiveStyle =
-    "border-gray-300 text-gray-700 bg-gray-50 hover:bg-gray-100";
-
   return (
     <div className="min-h-screen bg-gradient-to-b from-white to-gray-50">
       {/* Header Page */}
       <div className="bg-white shadow-sm border-b border-gray-300 px-8 py-5 sticky top-0 z-50">
-        {/* ... (Header tidak berubah) ... */}
         <div className="flex items-center gap-2">
           <FaCog className="text-blue-600 w-6 h-6" />
           <h2 className="text-2xl font-semibold text-gray-900">Pengaturan</h2>
         </div>
-
-        {/* Sub-Nav Cepat */}
-        <div className="mt-3 flex flex-wrap gap-2">
-          <a
-            href="#admin-section"
-            className={`${baseStyle} ${
-              activeSection === "admin" ? activeStyle : inactiveStyle
-            }`}
-            title="Loncat ke Manajemen Admin"
-            onClick={() => setActiveSection("admin")} // <-- onClick ini tetap ada untuk respons instan
-          >
-            <FaUsers /> Manajemen Admin
-          </a>
-          <a
-            href="#tampilan-section"
-            className={`${baseStyle} ${
-              activeSection === "tampilan" ? activeStyle : inactiveStyle
-            }`}
-            title="Loncat ke Pengaturan Tampilan"
-            onClick={() => setActiveSection("tampilan")} // <-- onClick ini tetap ada untuk respons instan
-          >
-            <FaPaintBrush /> Pengaturan Tampilan
-          </a>
-        </div>
       </div>
 
       <div className="p-6">
-        <PageAlert
-          {...msg}
-          onClose={() => setMsg({ type: "", text: "" })}
-        />
-
-        {/* ================================================== */}
-        {/* BAGIAN 1: MANAJEMEN ADMIN                          */}
-        {/* ================================================== */}
-        <section id="admin-section" className="mb-8">
-          <div className="bg-white border border-gray-200 rounded-2xl shadow-sm">
-            <div className="px-5 py-4 border-b flex items-center gap-2">
-              <FaUsers className="text-indigo-600" />
-              <h2 className="text-lg font-semibold text-gray-900">
-                Manajemen Admin
-              </h2>
-            </div>
-            <div className="p-5">
-              <TambahAdmin />
-            </div>
-          </div>
-        </section>
+        <PageAlert {...msg} onClose={() => setMsg({ type: "", text: "" })} />
 
         {/* ========================================= */}
-        {/* BAGIAN 2: PENGATURAN TAMPILAN           */}
+        {/* BAGIAN: PENGATURAN TAMPILAN               */}
         {/* ========================================= */}
         <section id="tampilan-section" className="mb-8">
           <div className="bg-white border border-gray-200 rounded-2xl shadow-sm">

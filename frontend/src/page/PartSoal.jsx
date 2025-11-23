@@ -1,4 +1,6 @@
-// File: src/page/PartSoal.jsx (Diperbarui untuk memanggil rute /public/)
+// File: src/page/PartSoal.jsx
+// UPDATED: acak opsi pilihan ganda per peserta + simpan urutan opsi di localStorage
+// (tetap include autosave draft ke backend + beacon on close)
 
 import React, {
   useEffect,
@@ -23,7 +25,7 @@ import SubmitUjianModal from "../component/submitujian.jsx";
 
 const API_URL = "http://localhost:5000";
 
-// --- FUNGSI SHUFFLE (TIDAK BERUBAH) ---
+// --- FUNGSI SHUFFLE ---
 const shuffleArray = (array) => {
   let currentIndex = array.length,
     randomIndex;
@@ -39,7 +41,7 @@ const shuffleArray = (array) => {
   return newArray;
 };
 
-// --- KOMPONEN StatusUjianBox (TIDAK BERUBAH) ---
+// --- KOMPONEN StatusUjianBox ---
 const StatusUjianBox = ({
   totalSoal,
   jumlahTerjawab,
@@ -136,7 +138,7 @@ const StatusUjianBox = ({
   );
 };
 
-// --- KOMPONEN InfoPesertaBox (TIDAK BERUBAH) ---
+// --- KOMPONEN InfoPesertaBox ---
 const InfoPesertaBox = ({ peserta }) => {
   return (
     <div className="bg-white rounded-xl border border-gray-200 p-5">
@@ -165,7 +167,7 @@ const InfoPesertaBox = ({ peserta }) => {
   );
 };
 
-// --- KOMPONEN InfoUjianBox (TIDAK BERUBAH) ---
+// --- KOMPONEN InfoUjianBox ---
 const InfoUjianBox = ({
   keterangan,
   tanggal,
@@ -210,7 +212,7 @@ const PartSoal = () => {
   const { id } = useParams();
   const navigate = useNavigate();
 
-  // State (Tidak berubah)
+  // State
   const [loading, setLoading] = useState(true);
   const [errMsg, setErrMsg] = useState("");
   const [keterangan, setKeterangan] = useState("");
@@ -244,12 +246,14 @@ const PartSoal = () => {
     };
   }, []);
 
-  // --- Helper (Tidak Berubah) ---
+  // --- Helper ---
   const pad2 = (n) => String(n).padStart(2, "0");
   const toLocalDateOnly = (val) => {
     const d = new Date(val);
     if (!isNaN(d)) {
-      return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+      return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(
+        d.getDate()
+      )}`;
     }
     const s = String(val || "");
     return s.includes("T") ? s.slice(0, 10) : s;
@@ -266,35 +270,46 @@ const PartSoal = () => {
     const peserta = JSON.parse(localStorage.getItem("pesertaData"));
     const pesertaId = peserta?.id;
     if (!pesertaId) {
-      throw new Error("getProgressKey: ID Peserta tidak ditemukan di localStorage.");
+      throw new Error(
+        "getProgressKey: ID Peserta tidak ditemukan di localStorage."
+      );
     }
     return `progress_${pesertaId}_${id}`;
   }, [id]);
 
   const getOrderKey = useCallback(() => {
     const peserta = JSON.parse(localStorage.getItem("pesertaData"));
-
     const pesertaId = peserta?.id;
     if (!pesertaId) {
       throw new Error("getOrderKey: ID Peserta tidak ditemukan di localStorage.");
     }
-
     return `order_${pesertaId}_${id}`;
   }, [id]);
 
+  // NEW: key urutan opsi per soal per peserta
+  const getOptionOrderKey = useCallback(
+    (soalId) => {
+      const peserta = JSON.parse(localStorage.getItem("pesertaData"));
+      const pesertaId = peserta?.id;
+      if (!pesertaId) {
+        throw new Error(
+          "getOptionOrderKey: ID Peserta tidak ditemukan di localStorage."
+        );
+      }
+      return `order_opsi_${pesertaId}_${id}_${soalId}`;
+    },
+    [id]
+  );
+
   // =======================================================
-  // ▼▼▼ FETCH DETAIL UJIAN (DIPERBARUI) ▼▼▼
+  // FETCH DETAIL UJIAN (PUBLIC)
   // =======================================================
   useEffect(() => {
     const fetchDetail = async () => {
       try {
         setLoading(true);
 
-        // ▼▼▼ PERUBAHAN DI SINI ▼▼▼
-        // Panggil rute publik, bukan rute admin
         const res = await fetch(`${API_URL}/api/ujian/public/${id}`);
-        // ▲▲▲ AKHIR PERUBAHAN ▲▲▲
-
         const data = await res.json();
         if (!res.ok) throw new Error(data.message || "Gagal memuat ujian.");
 
@@ -304,7 +319,7 @@ const PartSoal = () => {
         setDisplayJamMulai(data.jam_mulai || "");
         setDisplayJamBerakhir(data.jam_berakhir || "");
 
-        // 2. Set DURASI Pengerjaan
+        // 2. Set DURASI
         const durasiDariDb = parseInt(data.durasi, 10) || 0;
         if (durasiDariDb <= 0) {
           throw new Error("Durasi ujian tidak valid (0 menit).");
@@ -334,22 +349,28 @@ const PartSoal = () => {
         let soalListTerurut;
         const orderKey = getOrderKey();
         const savedOrderJson = localStorage.getItem(orderKey);
-        const isAcak = data.acak_soal === 1 || data.acak_soal === "1" || data.acak_soal === true;
+        const isAcakSoal =
+          data.acak_soal === 1 ||
+          data.acak_soal === "1" ||
+          data.acak_soal === true;
+
+        const isAcakOpsi =
+          data.acak_opsi === 1 ||
+          data.acak_opsi === "1" ||
+          data.acak_opsi === true ||
+          data.acak_opsi === "true";
 
         if (savedOrderJson) {
           console.log("Memuat urutan soal dari localStorage...");
           const savedSoalIds = JSON.parse(savedOrderJson);
           const soalMap = new Map(soalListDariApi.map((s) => [s.id, s]));
           soalListTerurut = savedSoalIds
-            .map((id) => soalMap.get(id))
+            .map((sid) => soalMap.get(sid))
             .filter(Boolean);
-        } else if (isAcak) {
-          // Masuk ke sini jika acak_soal aktif
+        } else if (isAcakSoal) {
           console.log("Mengacak soal dan menyimpan urutan...");
           const shuffledList = shuffleArray(soalListDariApi);
           const shuffledIds = shuffledList.map((s) => s.id);
-
-          // Simpan urutan acak agar konsisten jika di-refresh
           localStorage.setItem(orderKey, JSON.stringify(shuffledIds));
           soalListTerurut = shuffledList;
         } else {
@@ -357,13 +378,13 @@ const PartSoal = () => {
           soalListTerurut = soalListDariApi;
         }
 
-        // 5. Mapping Soal (Gambar URL diperbarui)
+        // 5. Mapping Soal + (NEW) Acak Opsi Pilihan Ganda per Peserta
         const mapped = soalListTerurut.map((s) => {
           let pilihanNormalized = [];
           if (Array.isArray(s.pilihan)) {
             if (s.pilihan.length > 0 && typeof s.pilihan[0] === "object") {
               pilihanNormalized = s.pilihan.map((p, idx) => ({
-                id: p.id || idx + 1,
+                id: p.id ?? idx + 1,
                 text: p.text ?? p,
               }));
             } else {
@@ -373,21 +394,61 @@ const PartSoal = () => {
               }));
             }
           }
+
+          // NEW: acak opsi hanya untuk pilihan ganda
+          let pilihanTerurut = pilihanNormalized;
+          if (
+            isAcakOpsi &&
+            (s.tipeSoal || "pilihanGanda") === "pilihanGanda" &&
+            pilihanNormalized.length > 1
+          ) {
+            try {
+              const opsiOrderKey = getOptionOrderKey(s.id);
+              const savedOpsiOrderJson =
+                localStorage.getItem(opsiOrderKey);
+
+              if (savedOpsiOrderJson) {
+                const savedOpsiIds = JSON.parse(savedOpsiOrderJson);
+                const opsiMap = new Map(
+                  pilihanNormalized.map((o) => [o.id, o])
+                );
+                const ordered = savedOpsiIds
+                  .map((oid) => opsiMap.get(oid))
+                  .filter(Boolean);
+
+                // pakai order saved jika lengkap, kalau tidak fallback
+                if (ordered.length === pilihanNormalized.length) {
+                  pilihanTerurut = ordered;
+                } else {
+                  pilihanTerurut = pilihanNormalized;
+                }
+              } else {
+                const shuffledOpsi = shuffleArray(pilihanNormalized);
+                const shuffledOpsiIds = shuffledOpsi.map((o) => o.id);
+                localStorage.setItem(
+                  opsiOrderKey,
+                  JSON.stringify(shuffledOpsiIds)
+                );
+                pilihanTerurut = shuffledOpsi;
+              }
+            } catch (e) {
+              console.warn("Gagal mengacak opsi:", e.message);
+              pilihanTerurut = pilihanNormalized;
+            }
+          }
+
           return {
             id: s.id,
             tipeSoal: s.tipeSoal || "pilihanGanda",
             soalText: s.soalText || "",
-            // ▼▼▼ PERUBAHAN URL GAMBAR ▼▼▼
-            // (Menggunakan path relatif dari index.js, bukan dari /api/ujian)
             gambarUrl: s.gambar ? `${API_URL}${s.gambar}` : null,
-            // ▲▲▲ AKHIR PERUBAHAN ▲▲▲
-            pilihan: pilihanNormalized,
+            pilihan: pilihanTerurut,
           };
         });
 
         setSoalList(mapped);
 
-        // 6. Inisialisasi State Jawaban
+        // 6. Inisialisasi State Jawaban dari LocalStorage
         const progressKey = getProgressKey();
         const savedProgress =
           JSON.parse(localStorage.getItem(progressKey)) || {};
@@ -401,7 +462,7 @@ const PartSoal = () => {
         setJawabanUser(initJawab);
         setRaguRagu(initRagu);
 
-        // 7. Inisialisasi TIMER BARU
+        // 7. Inisialisasi TIMER
         const nowMs = Date.now();
         if (nowMs < startWindow) {
           throw new Error("Ujian belum dimulai.");
@@ -409,6 +470,7 @@ const PartSoal = () => {
         if (nowMs > endWindow) {
           throw new Error("Jendela waktu untuk memulai ujian sudah ditutup.");
         }
+
         let startTimeMs = savedProgress.startTimeMs;
         if (!startTimeMs) {
           console.log("Memulai timer ujian...");
@@ -418,6 +480,7 @@ const PartSoal = () => {
         }
         const durationEndMs = startTimeMs + durasiDariDb * 60 * 1000;
         const actualEndMs = durationEndMs;
+
         if (nowMs > actualEndMs) {
           setSisaDetik(0);
         } else {
@@ -454,14 +517,15 @@ const PartSoal = () => {
     };
 
     fetchDetail();
-  }, [id, getOrderKey, getProgressKey]);
+  }, [id, getOrderKey, getProgressKey, getOptionOrderKey]);
 
-  // --- TIMER COUNTDOWN (Tidak Berubah) ---
+  // =======================================================
+  // TIMER COUNTDOWN
+  // =======================================================
   useEffect(() => {
     if (sisaDetik === null) return;
-    if (sisaDetik === 0) {
-      return;
-    }
+    if (sisaDetik === 0) return;
+
     const t = setInterval(() => {
       setSisaDetik((prev) => {
         if (prev <= 1) {
@@ -471,6 +535,7 @@ const PartSoal = () => {
         return prev - 1;
       });
     }, 1000);
+
     return () => clearInterval(t);
   }, [sisaDetik]);
 
@@ -484,7 +549,9 @@ const PartSoal = () => {
       : `${pad2(m)}:${pad2(s)}`;
   }, [sisaDetik]);
 
-  // --- Auto-save progress (Tidak Berubah) ---
+  // =======================================================
+  // AUTO-SAVE PROGRESS -> localStorage
+  // =======================================================
   useEffect(() => {
     if (loading || soalList.length === 0 || sisaDetik === null) return;
     const progressKey = getProgressKey();
@@ -510,32 +577,143 @@ const PartSoal = () => {
     sisaDetik,
   ]);
 
-  // --- HANDLER (Tidak berubah) ---
+  // =======================================================
+  // AUTO-SAVE DRAFT ke BACKEND /api/hasil/draft
+  // =======================================================
+  const saveDraftToServer = useCallback(async () => {
+    try {
+      if (isSubmitting) return;
+      const peserta = JSON.parse(localStorage.getItem("pesertaData"));
+      if (!peserta?.id || soalList.length === 0) return;
+
+      const jawabanArray = soalList.map((soal) => ({
+        question_id: soal.id,
+        tipe_soal: soal.tipeSoal,
+        jawaban_text: jawabanUser[soal.id] || null,
+      }));
+
+      await fetch(`${API_URL}/api/hasil/draft`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          peserta_id: peserta.id,
+          exam_id: id,
+          jawaban: jawabanArray,
+        }),
+        keepalive: true,
+      });
+    } catch (e) {
+      console.warn("Autosave draft gagal:", e.message);
+    }
+  }, [id, soalList, jawabanUser, isSubmitting]);
+
+  useEffect(() => {
+    if (loading || soalList.length === 0 || sisaDetik === null) return;
+    const iv = setInterval(saveDraftToServer, 15000);
+    return () => clearInterval(iv);
+  }, [saveDraftToServer, loading, soalList.length, sisaDetik]);
+
+  // Kirim draft terakhir ketika tab ditutup / refresh / hidden
+  useEffect(() => {
+    if (loading || soalList.length === 0) return;
+
+    const sendDraftBeacon = () => {
+      try {
+        if (isSubmitting) return;
+        const peserta = JSON.parse(localStorage.getItem("pesertaData"));
+        if (!peserta?.id) return;
+
+        const jawabanArray = soalList.map((soal) => ({
+          question_id: soal.id,
+          tipe_soal: soal.tipeSoal,
+          jawaban_text: jawabanUser[soal.id] || null,
+        }));
+
+        const payload = {
+          peserta_id: peserta.id,
+          exam_id: id,
+          jawaban: jawabanArray,
+        };
+
+        const url = `${API_URL}/api/hasil/draft`;
+
+        if (navigator.sendBeacon) {
+          const blob = new Blob([JSON.stringify(payload)], {
+            type: "application/json",
+          });
+          navigator.sendBeacon(url, blob);
+        } else {
+          fetch(url, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+            keepalive: true,
+          });
+        }
+      } catch (e) {
+        console.warn("Beacon draft gagal:", e.message);
+      }
+    };
+
+    const onPageHide = () => sendDraftBeacon();
+    const onBeforeUnload = () => sendDraftBeacon();
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "hidden") sendDraftBeacon();
+    };
+
+    window.addEventListener("pagehide", onPageHide);
+    window.addEventListener("beforeunload", onBeforeUnload);
+    document.addEventListener("visibilitychange", onVisibilityChange);
+
+    return () => {
+      window.removeEventListener("pagehide", onPageHide);
+      window.removeEventListener("beforeunload", onBeforeUnload);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+    };
+  }, [loading, soalList, jawabanUser, id, isSubmitting]);
+
+  // =======================================================
+  // HANDLER JAWABAN
+  // =======================================================
   const handleJawabPilihan = (pilihanId) => {
     const soalId = soalList[currentIndex]?.id;
     if (!soalId) return;
     setJawabanUser((prev) => ({ ...prev, [soalId]: pilihanId }));
   };
+
   const handleJawabEsai = (text) => {
     const soalId = soalList[currentIndex]?.id;
     if (!soalId) return;
     setJawabanUser((prev) => ({ ...prev, [soalId]: text }));
   };
+
   const toggleRagu = () => {
     const soalId = soalList[currentIndex]?.id;
     if (!soalId) return;
     setRaguRagu((prev) => ({ ...prev, [soalId]: !prev[soalId] }));
   };
+
+  const handleBatalJawab = () => {
+    const soalId = soalList[currentIndex]?.id;
+    if (!soalId) return;
+    setJawabanUser((prev) => ({ ...prev, [soalId]: "" }));
+  };
+
   const gotoPrev = () => {
     setCurrentIndex((idx) => (idx > 0 ? idx - 1 : idx));
   };
+
   const gotoNext = () => {
-    setCurrentIndex((idx) => (idx < soalList.length - 1 ? idx + 1 : idx));
+    setCurrentIndex((idx) =>
+      idx < soalList.length - 1 ? idx + 1 : idx
+    );
   };
+
   const gotoNomor = (idx) => setCurrentIndex(idx);
 
-  // --- handleSubmit (Tidak Berubah) ---
-  // (Memanggil /api/hasil, yang sudah publik)
+  // =======================================================
+  // SUBMIT FINAL
+  // =======================================================
   const handleSubmit = useCallback(
     async (isAutoSubmit = false) => {
       if (isSubmitting) return;
@@ -557,29 +735,40 @@ const PartSoal = () => {
           jawaban_text: jawaban,
         };
       });
+
       const payload = {
         peserta_id: peserta.id,
         exam_id: id,
         jawaban: jawabanArray,
       };
 
-      // ▼▼▼ HANYA ADA SATU BLOK try...catch ▼▼▼
       try {
         const res = await fetch(`${API_URL}/api/hasil`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(payload),
         });
+
         const data = await res.json();
         if (!res.ok) throw new Error(data.message);
 
         localStorage.setItem("newHasilUjian", "true");
 
-        // 💡 PERBAIKAN: Ambil Key-nya DULU
+        // ambil key dulu
         const progressKey = getProgressKey();
         const orderKey = getOrderKey();
 
-        // 💡 SEKARANG baru hapus semua datanya
+        // NEW: hapus juga urutan opsi per soal
+        try {
+          soalList.forEach((soal) => {
+            const ok = getOptionOrderKey(soal.id);
+            localStorage.removeItem(ok);
+          });
+        } catch (e) {
+          console.warn("Gagal hapus order opsi:", e.message);
+        }
+
+        // hapus semua data ujian di localStorage
         localStorage.removeItem("pesertaData");
         localStorage.removeItem("loginPeserta");
         localStorage.removeItem(progressKey);
@@ -616,14 +805,16 @@ const PartSoal = () => {
       navigate,
       getProgressKey,
       getOrderKey,
+      getOptionOrderKey,
     ]
   );
 
-  // --- useEffect AUTO-SUBMIT (Tidak berubah) ---
+  // =======================================================
+  // AUTO-SUBMIT saat timer 0
+  // =======================================================
   useEffect(() => {
-    if (loading || sisaDetik === null || isSubmitting) {
-      return;
-    }
+    if (loading || sisaDetik === null || isSubmitting) return;
+
     if (sisaDetik === 0) {
       if (countdownIntervalRef.current === null && !showAutoSubmitModal) {
         console.log("WAKTU HABIS: Auto-submit dipicu.");
@@ -633,7 +824,9 @@ const PartSoal = () => {
     }
   }, [sisaDetik, isSubmitting, loading, handleSubmit, showAutoSubmitModal]);
 
-  // --- RENDER --- (Tidak berubah)
+  // =======================================================
+  // RENDER
+  // =======================================================
   if (loading)
     return (
       <div className="flex-1 flex items-center justify-center bg-gradient-to-br from-blue-50 to-blue-100 text-blue-700">
@@ -659,9 +852,8 @@ const PartSoal = () => {
     );
 
   const soalAktif = soalList[currentIndex];
-  const jumlahTerjawab = Object.values(jawabanUser).filter(
-    (v) => v !== ""
-  ).length;
+  const jumlahTerjawab = Object.values(jawabanUser).filter((v) => v !== "")
+    .length;
 
   return (
     <>
@@ -679,21 +871,22 @@ const PartSoal = () => {
                     {soalAktif?.tipeSoal === "pilihanGanda"
                       ? "Pilihan Ganda"
                       : soalAktif?.tipeSoal === "teksSingkat"
-                        ? "Jawaban Singkat"
-                        : "Esai / Uraian"}
+                      ? "Jawaban Singkat"
+                      : "Esai / Uraian"}
                   </div>
                 </div>
+
                 <div className="flex flex-col gap-2 sm:items-end">
                   <div className="flex items-center gap-2 text-[12px]">
                     <button
                       onClick={gotoPrev}
                       disabled={currentIndex === 0}
                       className="
-    px-3 py-1.5 rounded-md border text-[12px]
-    bg-blue-600 text-white border-blue-600
-    hover:bg-blue-700 hover:border-blue-700
-    disabled:opacity-40 disabled:cursor-not-allowed
-  "
+                        px-3 py-1.5 rounded-md border text-[12px]
+                        bg-blue-600 text-white border-blue-600
+                        hover:bg-blue-700 hover:border-blue-700
+                        disabled:opacity-40 disabled:cursor-not-allowed
+                      "
                     >
                       Kembali
                     </button>
@@ -702,27 +895,42 @@ const PartSoal = () => {
                       onClick={gotoNext}
                       disabled={currentIndex === soalList.length - 1}
                       className="
-    px-3 py-1.5 rounded-md border text-[12px]
-    bg-green-600 text-white border-green-600
-    hover:bg-green-700 hover:border-green-700
-    disabled:opacity-40 disabled:cursor-not-allowed
-  "
+                        px-3 py-1.5 rounded-md border text-[12px]
+                        bg-green-600 text-white border-green-600
+                        hover:bg-green-700 hover:border-green-700
+                        disabled:opacity-40 disabled:cursor-not-allowed
+                      "
                     >
                       Lanjut
                     </button>
                   </div>
 
-                  <button
-                    onClick={toggleRagu}
-                    className={`text-[12px] px-3 py-1.5 rounded-md border ${raguRagu[soalAktif?.id]
-                      ? "bg-yellow-50 border-yellow-400 text-yellow-700"
-                      : "bg-white border-orange-300 text-gray-600 hover:bg-gray-50"
+                  <div className="flex items-center gap-2">
+                    {/* Tombol Batal */}
+                    {soalAktif?.tipeSoal === "pilihanGanda" &&
+                      jawabanUser[soalAktif.id] && (
+                        <button
+                          onClick={handleBatalJawab}
+                          className="px-3 py-1.5 rounded-md border text-[12px] bg-red-50 text-red-600 border-red-200 hover:bg-red-100 hover:border-red-300 transition-colors"
+                          title="Hapus jawaban terpilih"
+                        >
+                          Batal
+                        </button>
+                      )}
+
+                    <button
+                      onClick={toggleRagu}
+                      className={`text-[12px] px-3 py-1.5 rounded-md border ${
+                        raguRagu[soalAktif?.id]
+                          ? "bg-yellow-50 border-yellow-400 text-yellow-700"
+                          : "bg-white border-orange-300 text-gray-600 hover:bg-gray-50"
                       }`}
-                  >
-                    {raguRagu[soalAktif?.id]
-                      ? "Ditandai ragu-ragu"
-                      : "Tandai ragu-ragu"}
-                  </button>
+                    >
+                      {raguRagu[soalAktif?.id]
+                        ? "Ditandai ragu-ragu"
+                        : "Tandai ragu-ragu"}
+                    </button>
+                  </div>
                 </div>
               </div>
 
@@ -755,16 +963,18 @@ const PartSoal = () => {
                         <button
                           key={pil.id}
                           onClick={() => handleJawabPilihan(pil.id)}
-                          className={`w-full text-left flex items-start gap-3 rounded-lg border p-4 text-[15px] leading-relaxed transition ${aktif
-                            ? "bg-white border-blue-500 ring-2 ring-blue-200"
-                            : "bg-white border-gray-300 hover:bg-gray-50 hover:border-blue-300"
-                            }`}
+                          className={`w-full text-left flex items-start gap-3 rounded-lg border p-4 text-[15px] leading-relaxed transition ${
+                            aktif
+                              ? "bg-white border-blue-500 ring-2 ring-blue-200"
+                              : "bg-white border-gray-300 hover:bg-gray-50 hover:border-blue-300"
+                          }`}
                         >
                           <div
-                            className={`flex-shrink-0 w-8 h-8 rounded-md flex items-center justify-center text-sm font-semibold ${aktif
-                              ? "bg-blue-600 text-white"
-                              : "bg-gray-100 text-gray-700 border border-gray-300"
-                              }`}
+                            className={`flex-shrink-0 w-8 h-8 rounded-md flex items-center justify-center text-sm font-semibold ${
+                              aktif
+                                ? "bg-blue-600 text-white"
+                                : "bg-gray-100 text-gray-700 border border-gray-300"
+                            }`}
                           >
                             {labelHuruf}
                           </div>
@@ -772,8 +982,9 @@ const PartSoal = () => {
                             {pil.text || "(kosong)"}
                           </div>
                           <div
-                            className={`text-lg ${aktif ? "text-blue-600" : "text-gray-400"
-                              }`}
+                            className={`text-lg ${
+                              aktif ? "text-blue-600" : "text-gray-400"
+                            }`}
                           >
                             {aktif ? <FaCheckCircle /> : <FaRegCircle />}
                           </div>
@@ -783,29 +994,29 @@ const PartSoal = () => {
                   </div>
                 )}
 
-                {/* Esai atau Teks Singkat */}
+                {/* Esai / Teks Singkat */}
                 {(soalAktif?.tipeSoal === "esay" ||
                   soalAktif?.tipeSoal === "teksSingkat") && (
-                    <div className="mt-6">
-                      <label className="block text-sm font-medium text-gray-700 mb-2">
-                        Jawaban Anda
-                      </label>
-                      <textarea
-                        className="w-full min-h-[160px] bg-white border border-gray-300 rounded-lg p-4 text-gray-800 text-[15px] leading-relaxed focus:outline-none focus:ring-2 focus:ring-blue-400/40 focus:border-blue-400"
-                        value={jawabanUser[soalAktif.id] || ""}
-                        onChange={(e) => handleJawabEsai(e.target.value)}
-                        placeholder="Ketik jawaban Anda di sini..."
-                      />
-                      {soalAktif?.tipeSoal === "teksSingkat" && (
-                        <p className="text-xs text-gray-500 mt-1"></p>
-                      )}
-                    </div>
-                  )}
+                  <div className="mt-6">
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Jawaban Anda
+                    </label>
+                    <textarea
+                      className="w-full min-h-[160px] bg-white border border-gray-300 rounded-lg p-4 text-gray-800 text-[15px] leading-relaxed focus:outline-none focus:ring-2 focus:ring-blue-400/40 focus:border-blue-400"
+                      value={jawabanUser[soalAktif.id] || ""}
+                      onChange={(e) => handleJawabEsai(e.target.value)}
+                      placeholder="Ketik jawaban Anda di sini..."
+                    />
+                    {soalAktif?.tipeSoal === "teksSingkat" && (
+                      <p className="text-xs text-gray-500 mt-1"></p>
+                    )}
+                  </div>
+                )}
               </div>
             </div>
           </main>
 
-          {/* Kolom Kanan: Status Ujian */}
+          {/* Kolom Kanan */}
           <aside className="w-full lg:w-72 xl:w-80 space-y-6">
             <InfoPesertaBox peserta={pesertaInfo} />
             <StatusUjianBox
@@ -831,7 +1042,7 @@ const PartSoal = () => {
         </div>
       </div>
 
-      {/* RENDER MODAL */}
+      {/* MODAL */}
       {showConfirmModal && (
         <SubmitUjianModal
           mode="confirm"

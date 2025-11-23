@@ -1,25 +1,26 @@
+// File: src/admin/DaftarUndangan.jsx
+
 import React, { useState, useEffect, useCallback } from "react";
 import {
   FaSyncAlt,
   FaExclamationCircle,
   FaCopy,
   FaCheck,
-  FaUsers,
-  FaListUl, // Ganti/tambah ikon untuk judul grup
+  FaHistory,
+  FaListUl,
+  FaTrashAlt,
 } from "react-icons/fa";
 
 const API_URL = "http://localhost:5000";
 
 const DaftarUndangan = ({ refreshTrigger }) => {
-  // --- STATE BERUBAH ---
-  // Kita tidak lagi menyimpan array datar, tapi objek yang dikelompokkan
   const [groupedInvitations, setGroupedInvitations] = useState({});
-  // ---------------------
-
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [copiedCode, setCopiedCode] = useState(null);
+  const [deletingId, setDeletingId] = useState(null);
 
+  // --- Fetch Data ---
   const fetchData = useCallback(async () => {
     setLoading(true);
     setError("");
@@ -33,38 +34,27 @@ const DaftarUndangan = ({ refreshTrigger }) => {
         try {
           const errData = await response.json();
           errorMsg = errData.message || errorMsg;
-        } catch (e) {
-          /* Abaikan */
-        }
+        } catch (e) {}
         throw new Error(errorMsg);
       }
-      const data = await response.json(); // data adalah array datar [invite1, invite2, ...]
+      const data = await response.json();
 
-      // --- LOGIKA PENGELOMPOKAN BARU ---
+      // Grouping by Exam ID
       const grouped = data.reduce((acc, invite) => {
-        // Gunakan exam_id sebagai kunci unik
         const examId = invite.exam_id || "unknown";
-
-        // Buat grup jika belum ada
         if (!acc[examId]) {
           acc[examId] = {
-            // Ambil keterangan dari undangan pertama yang kita temui
-            keterangan:
-              invite.keterangan_ujian || `Ujian (ID: ${examId})`,
-            list: [], // Buat daftar kosong untuk undangan
+            keterangan: invite.keterangan_ujian || `Ujian (ID: ${examId})`,
+            list: [],
           };
         }
-
-        // Tambahkan undangan ini ke daftar grupnya
         acc[examId].list.push(invite);
         return acc;
-      }, {}); // Mulai dengan objek kosong
+      }, {});
 
-      setGroupedInvitations(grouped); // Simpan data yang sudah dikelompokkan
-      // --- AKHIR LOGIKA PENGELOMPOKAN ---
-
+      setGroupedInvitations(grouped);
     } catch (err) {
-      console.error("Error fetching invitations:", err);
+      console.error(err);
       setError(err.message);
     } finally {
       setLoading(false);
@@ -75,24 +65,44 @@ const DaftarUndangan = ({ refreshTrigger }) => {
     fetchData();
   }, [fetchData, refreshTrigger]);
 
+  // --- Copy Code Handler ---
   const handleCopy = (loginCode) => {
     navigator.clipboard.writeText(loginCode).then(
       () => {
         setCopiedCode(loginCode);
         setTimeout(() => setCopiedCode(null), 1500);
       },
-      (err) => {
-        console.error("Gagal menyalin kode:", err);
-        alert("Gagal menyalin kode.");
-      }
+      (err) => alert("Gagal menyalin kode.")
     );
   };
 
+  // --- Cancel/Delete Handler ---
+  const handleCancelInvitation = async (invitationId, email) => {
+    if (!window.confirm(`Batalkan undangan untuk ${email}? \nPeserta tidak akan bisa login lagi.`)) {
+      return;
+    }
+    setDeletingId(invitationId);
+    try {
+      const token = sessionStorage.getItem("adminToken");
+      const response = await fetch(`${API_URL}/api/invite/${invitationId}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (!response.ok) throw new Error("Gagal membatalkan undangan.");
+      
+      // Refresh data setelah hapus berhasil
+      fetchData();
+    } catch (err) {
+      alert(`Gagal: ${err.message}`);
+    } finally {
+      setDeletingId(null);
+    }
+  };
+
+  // --- Date Formatter ---
   const formatTanggal = (isoString) => {
     try {
-      const date = new Date(isoString);
-      return date.toLocaleString("id-ID", {
-        timeZone: "Asia/Jakarta",
+      return new Date(isoString).toLocaleString("id-ID", {
         day: "2-digit",
         month: "short",
         year: "numeric",
@@ -105,145 +115,143 @@ const DaftarUndangan = ({ refreshTrigger }) => {
   };
 
   return (
-    <div>
-      <div className="flex justify-between items-center mb-4">
-        <h3 className="text-lg font-semibold text-gray-800 flex items-center gap-2">
-          <FaUsers className="text-gray-500" />
-          Riwayat Undangan
+    <div className="w-full">
+      {/* Header Section Riwayat */}
+      <div className="px-6 py-4 bg-gray-50 border-b border-gray-200 flex justify-between items-center">
+        <h3 className="font-semibold text-gray-700 flex items-center gap-2">
+          <FaHistory className="text-gray-500" /> Riwayat & Status Undangan
         </h3>
         <button
           onClick={fetchData}
           disabled={loading}
-          className="flex items-center gap-1.5 px-3 py-1.5 bg-gray-200 text-gray-700 rounded-md hover:bg-gray-300 transition text-xs font-medium"
+          className="flex items-center gap-2 px-3 py-1.5 bg-white border border-gray-300 text-gray-600 rounded-md hover:bg-gray-50 hover:text-blue-600 transition text-sm font-medium shadow-sm"
         >
-          <FaSyncAlt className={loading ? "animate-spin" : ""} /> Refresh
+          <FaSyncAlt className={loading ? "animate-spin" : ""} /> 
+          <span className="hidden sm:inline">Refresh Data</span>
         </button>
       </div>
 
-      {loading && (
-        <p className="text-sm text-gray-500 text-center py-4">Memuat riwayat...</p>
-      )}
-      {error && (
-        <div className="text-sm text-red-600 bg-red-50 p-3 rounded border border-red-200 flex items-center gap-2">
-          <FaExclamationCircle /> {error}
-        </div>
-      )}
-
-      {/* --- PERUBAHAN LOGIKA CEK DATA KOSONG --- */}
-      {!loading &&
-        !error &&
-        Object.keys(groupedInvitations).length === 0 && (
-          <p className="text-sm text-gray-500 text-center py-4">
-            Belum ada undangan yang tersimpan.
-          </p>
+      <div className="p-6">
+        {/* Loading State */}
+        {loading && (
+          <div className="text-center py-8 text-gray-500 flex flex-col items-center">
+            <FaSyncAlt className="animate-spin mb-2 w-6 h-6 text-blue-500" />
+            Memuat data riwayat...
+          </div>
+        )}
+        
+        {/* Error State */}
+        {error && (
+          <div className="text-sm text-red-600 bg-red-50 p-4 rounded-lg border border-red-200 flex items-center gap-2">
+            <FaExclamationCircle className="text-lg" /> {error}
+          </div>
         )}
 
-      {/* --- PERUBAHAN LOGIKA RENDER TABEL --- */}
-      {!loading && !error && Object.keys(groupedInvitations).length > 0 && (
-        // Wrapper untuk semua grup, dengan scroll
-        <div className="space-y-6 max-h-96 overflow-y-auto pr-2">
-          {/* Loop melalui Objek Grup, bukan Array */}
-          {Object.entries(groupedInvitations).map(([examId, groupData]) => (
+        {/* Empty State */}
+        {!loading && !error && Object.keys(groupedInvitations).length === 0 && (
+          <div className="text-center py-12 border-2 border-dashed border-gray-300 rounded-lg">
+            <p className="text-gray-500 font-medium">Belum ada undangan yang dikirim.</p>
+            <p className="text-sm text-gray-400 mt-1">Kirim undangan melalui form di atas.</p>
+          </div>
+        )}
 
-            // 1. Buat kontainer untuk setiap grup
-            <div
-              key={examId}
-              className="bg-white rounded-lg shadow-sm border border-gray-200"
-            >
-              {/* 2. Tampilkan Judul Keterangan Ujian di atas tabel */}
-              <h4 className="text-sm font-semibold text-gray-800 bg-gray-50 p-3 border-b border-gray-200 rounded-t-lg flex items-center gap-2">
-                <FaListUl className="text-blue-600" />
-                {groupData.keterangan}
-              </h4>
+        {/* Data Render */}
+        {!loading && !error && Object.keys(groupedInvitations).length > 0 && (
+          <div className="space-y-8">
+            {Object.entries(groupedInvitations).map(([examId, groupData]) => (
+              <div key={examId} className="border border-gray-200 rounded-lg overflow-hidden shadow-sm">
+                {/* Group Header */}
+                <div className="bg-blue-50 px-4 py-3 border-b border-blue-100 flex items-center gap-2">
+                  <FaListUl className="text-blue-600" />
+                  <h4 className="font-semibold text-blue-800 text-sm md:text-base">
+                    {groupData.keterangan}
+                  </h4>
+                </div>
 
-              {/* 3. Buat tabel HANYA untuk grup ini */}
-              <div className="overflow-x-auto">
-                <table className="min-w-full text-xs text-left table-fixed">
-                  <thead className="bg-white text-gray-600 uppercase">
-                    <tr>
-                      {/* Kolom Keterangan Ujian HILANG dari sini */}
-                      <th className="py-2 px-3 w-[40%] border-b border-gray-200">
-                        Email
-                      </th>
-                      <th className="py-2 px-3 w-[20%] border-b border-gray-200">
-                        Kode Login
-                      </th>
-                      <th className="py-2 px-3 w-[15%] border-b border-gray-200">
-                        Batas
-                      </th>
-                      <th className="py-2 px-3 w-[25%] border-b border-gray-200">
-                        Waktu Kirim
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-100">
-                    {/* 4. Loop melalui daftar undangan di grup ini */}
-                    {groupData.list.map((invite) => (
-                      <tr key={invite.id} className="hover:bg-gray-50 align-top">
+                {/* Table */}
+                <div className="overflow-x-auto">
+                  <table className="min-w-full text-sm text-left">
+                    <thead className="bg-gray-50 text-gray-500 uppercase text-xs tracking-wider font-semibold">
+                      <tr>
+                        {/* Lebar kolom diatur agar tombol aksi tidak terhimpit */}
+                        <th className="py-3 px-4 w-[35%]">Email Peserta</th>
+                        <th className="py-3 px-4 w-[20%]">Kode Login</th>
+                        <th className="py-3 px-4 w-[15%] text-center">Batas</th>
+                        <th className="py-3 px-4 w-[20%]">Waktu Kirim</th>
+                        <th className="py-3 px-4 w-[10%] text-center">Aksi</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-100 bg-white">
+                      {groupData.list.map((invite) => (
+                        <tr key={invite.id} className="hover:bg-gray-50 transition-colors">
+                          
+                          {/* Email - Gunakan break-all agar email panjang turun ke bawah */}
+                          <td className="py-3 px-4 text-gray-800 font-medium break-all align-middle">
+                            {invite.email}
+                          </td>
 
-                        {/* Sel Email */}
-                        <td
-                          className="py-2 px-3 font-medium text-gray-800 whitespace-normal break-words"
-                          title={invite.email}
-                        >
-                          {invite.email}
-                        </td>
+                          {/* Kode Login + Copy */}
+                          <td className="py-3 px-4 align-middle">
+                            <div className="flex items-center gap-2 bg-gray-100 w-fit px-2 py-1 rounded border border-gray-200">
+                              <span className="font-mono text-gray-700 tracking-wide select-all">
+                                {invite.login_code}
+                              </span>
+                              <button
+                                onClick={() => handleCopy(invite.login_code)}
+                                className={`ml-1 ${copiedCode === invite.login_code ? "text-green-600" : "text-gray-400 hover:text-blue-600"}`}
+                                title="Salin Kode"
+                              >
+                                {copiedCode === invite.login_code ? <FaCheck/> : <FaCopy/>}
+                              </button>
+                            </div>
+                          </td>
 
-                        {/* Kolom Keterangan Ujian HILANG dari sini */}
-
-                        {/* Sel Kode Login + Tombol Copy */}
-                        <td className="py-2 px-3 whitespace-nowrap">
-                          <div className="flex items-center gap-2">
-                            <span className="font-mono bg-gray-100 px-1.5 py-0.5 rounded text-gray-700">
-                              {invite.login_code}
+                          {/* Status Batas Login */}
+                          <td className="py-3 px-4 text-center align-middle">
+                            <span className={`inline-block px-2 py-0.5 rounded text-xs font-bold ${
+                                invite.login_count >= invite.max_logins
+                                  ? "bg-red-100 text-red-700"
+                                  : "bg-green-100 text-green-700"
+                              }`}>
+                              {invite.login_count} / {invite.max_logins}
                             </span>
+                          </td>
+
+                          {/* Waktu Kirim */}
+                          <td className="py-3 px-4 text-gray-500 text-xs align-middle">
+                            {formatTanggal(invite.sent_at)}
+                          </td>
+
+                          {/* Tombol Hapus / Batalkan */}
+                          <td className="py-3 px-4 text-center align-middle">
                             <button
-                              onClick={() => handleCopy(invite.login_code)}
-                              className={`p-1 rounded ${copiedCode === invite.login_code
-                                  ? "text-green-600"
-                                  : "text-gray-400 hover:text-blue-600"
-                                }`}
-                              title={
-                                copiedCode === invite.login_code
-                                  ? "Tersalin!"
-                                  : "Salin Kode"
-                              }
+                              onClick={() => handleCancelInvitation(invite.id, invite.email)}
+                              disabled={deletingId === invite.id}
+                              className={`p-2 rounded-lg transition-all ${
+                                deletingId === invite.id 
+                                ? "bg-gray-100 text-gray-400 cursor-wait" 
+                                : "bg-white border border-red-200 text-red-500 hover:bg-red-50 hover:border-red-300 hover:shadow-sm"
+                              }`}
+                              title="Batalkan Undangan & Hapus Akses"
                             >
-                              {copiedCode === invite.login_code ? (
-                                <FaCheck />
+                              {deletingId === invite.id ? (
+                                <FaSyncAlt className="animate-spin w-4 h-4" />
                               ) : (
-                                <FaCopy />
+                                <FaTrashAlt className="w-4 h-4" />
                               )}
                             </button>
-                          </div>
-                        </td>
+                          </td>
 
-                        {/* Sel Batas Login */}
-                        <td className="py-2 px-3 whitespace-nowrap text-gray-600">
-                          <span
-                            className={`font-semibold ${invite.login_count >= invite.max_logins
-                                ? "text-red-500"
-                                : "text-green-600"
-                              }`}
-                            title="Digunakan / Batas"
-                          >
-                            {invite.login_count} / {invite.max_logins}
-                          </span>
-                        </td>
-
-                        {/* Sel Waktu Kirim */}
-                        <td className="py-2 px-3 whitespace-nowrap text-gray-600">
-                          {formatTanggal(invite.sent_at)}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               </div>
-            </div>
-          ))}
-        </div>
-      )}
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   );
 };

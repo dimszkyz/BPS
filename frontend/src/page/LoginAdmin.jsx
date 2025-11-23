@@ -204,6 +204,13 @@ const LoginAdmin = () => {
               {loading ? "Memverifikasi..." : "Login"}
             </button>
           </form>
+          <button
+  type="button"
+  onClick={() => navigate("/admin/lupa-password")}
+  className="text-sm text-indigo-600 hover:underline mt-2"
+>
+  Lupa password?
+</button>
         </div>
       </div>
 
