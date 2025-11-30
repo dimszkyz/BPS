@@ -1,4 +1,4 @@
-// File: src/admin/UbahPassword.jsx (LAYOUT WIDEN RIGHT PANEL)
+// File: src/admin/UbahPassword.jsx
 import React, { useEffect, useState, useCallback } from "react";
 import {
   FaKey,
@@ -17,6 +17,7 @@ import PermintaanResetPassword from "./PermintaanResetPassword";
 const API_URL = "http://localhost:5000";
 const CHANGE_PW_ENDPOINT = "/api/admin/change-password";
 
+// Komponen Pesan Notifikasi (Memoized)
 const MemoizedMessage = ({ type, text, onDismiss }) => {
   if (!text) return null;
   const isSuccess = type === "success";
@@ -27,7 +28,7 @@ const MemoizedMessage = ({ type, text, onDismiss }) => {
 
   return (
     <div
-      className={`flex items-start p-3 mb-5 text-sm border rounded-xl ${bgColor} ${textColor} ${borderColor}`}
+      className={`flex items-start p-4 mb-6 text-sm border rounded-xl shadow-sm ${bgColor} ${textColor} ${borderColor} transition-all duration-300 animate-fade-in-down`}
       role="alert"
     >
       <Icon className="w-5 h-5 mt-0.5 mr-3 flex-shrink-0" />
@@ -36,7 +37,7 @@ const MemoizedMessage = ({ type, text, onDismiss }) => {
       </div>
       <button
         type="button"
-        className={`ml-3 ${textColor} rounded-lg p-1.5 inline-flex items-center justify-center h-8 w-8 hover:bg-black/5`}
+        className={`ml-3 ${textColor} rounded-lg p-1.5 inline-flex items-center justify-center h-8 w-8 hover:bg-black/5 transition-colors`}
         onClick={onDismiss}
         aria-label="Tutup notifikasi"
         title="Tutup"
@@ -47,6 +48,7 @@ const MemoizedMessage = ({ type, text, onDismiss }) => {
   );
 };
 
+// Utilitas Kekuatan Password
 const strengthLabel = (s) => {
   switch (s) {
     case 0:
@@ -84,7 +86,7 @@ const UbahPassword = () => {
   const [isSaving, setIsSaving] = useState(false);
   const [msg, setMsg] = useState({ type: "", text: "" });
 
-  // ✅ cek role login
+  // ✅ Cek role login
   const [isSuperadmin, setIsSuperadmin] = useState(false);
 
   const dismissMessage = useCallback(() => {
@@ -98,7 +100,7 @@ const UbahPassword = () => {
     }
   }, [msg, dismissMessage]);
 
-  // detect role dari adminData dulu, fallback ke JWT
+  // Detect role dari adminData atau JWT
   useEffect(() => {
     try {
       const adminDataRaw = sessionStorage.getItem("adminData");
@@ -198,44 +200,45 @@ const UbahPassword = () => {
     dismissMessage();
   };
 
-  // ✅ container width beda sesuai role (superadmin lebih lebar)
+  // ✅ Container Width: Superadmin lebih lebar (max-w-7xl), Admin biasa (max-w-2xl)
   const containerClass = isSuperadmin
-    ? "max-w-7xl mx-auto"
-    : "max-w-2xl mx-auto";
+    ? "max-w-7xl mx-auto w-full"
+    : "max-w-2xl mx-auto w-full";
 
-  // ✅ FORM CARD (dipakai di admin & superadmin)
+  // ✅ FORM CARD (Komponen UI)
   const FormUbahPassword = (
-    <div className="bg-white border border-gray-200 rounded-2xl shadow-sm overflow-hidden">
-      <div className="px-5 py-4 border-b bg-gray-50/60 flex items-center gap-2">
-        <FaShieldAlt className="text-indigo-600" />
-        <h2 className="text-base font-semibold text-gray-900">
+    <div className="bg-white border border-gray-200 rounded-2xl shadow-sm overflow-hidden h-full flex flex-col">
+      <div className="px-5 py-4 border-b border-gray-100 bg-gray-50/50 flex items-center gap-2">
+        <div className="p-2 bg-indigo-50 rounded-lg text-indigo-600">
+            <FaShieldAlt />
+        </div>
+        <h2 className="text-base font-bold text-gray-900">
           Form Ubah Password
         </h2>
       </div>
 
-      <form onSubmit={handleSubmit} className="p-5 space-y-4">
+      <form onSubmit={handleSubmit} className="p-5 space-y-5 flex-1">
         {/* Password Lama */}
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">
+          <label className="block text-sm font-semibold text-gray-700 mb-1.5">
             Password Lama
           </label>
-          <div className="relative">
-            <span className="absolute inset-y-0 left-0 pl-3 flex items-center text-gray-400">
+          <div className="relative group">
+            <span className="absolute inset-y-0 left-0 pl-3 flex items-center text-gray-400 group-focus-within:text-indigo-500 transition-colors">
               <FaLock />
             </span>
             <input
               type={showCur ? "text" : "password"}
               value={currentPassword}
               onChange={(e) => setCurrentPassword(e.target.value)}
-              className="block w-full pl-10 pr-10 py-2.5 border border-gray-300 rounded-xl shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
+              className="block w-full pl-10 pr-10 py-2.5 border border-gray-300 rounded-xl shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all"
               placeholder="Masukkan password lama"
               autoComplete="current-password"
             />
             <button
               type="button"
               onClick={() => setShowCur((v) => !v)}
-              className="absolute right-2 top-1/2 -translate-y-1/2 p-2 text-gray-500 hover:text-gray-700"
-              title={showCur ? "Sembunyikan" : "Tampilkan"}
+              className="absolute right-2 top-1/2 -translate-y-1/2 p-2 text-gray-400 hover:text-gray-600 transition-colors"
             >
               {showCur ? <FaEyeSlash /> : <FaEye />}
             </button>
@@ -244,18 +247,18 @@ const UbahPassword = () => {
 
         {/* Password Baru */}
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">
+          <label className="block text-sm font-semibold text-gray-700 mb-1.5">
             Password Baru
           </label>
-          <div className="relative">
-            <span className="absolute inset-y-0 left-0 pl-3 flex items-center text-gray-400">
+          <div className="relative group">
+            <span className="absolute inset-y-0 left-0 pl-3 flex items-center text-gray-400 group-focus-within:text-indigo-500 transition-colors">
               <FaKey />
             </span>
             <input
               type={showNew ? "text" : "password"}
               value={newPassword}
               onChange={(e) => setNewPassword(e.target.value)}
-              className={`block w-full pl-10 pr-10 py-2.5 border rounded-xl shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 ${
+              className={`block w-full pl-10 pr-10 py-2.5 border rounded-xl shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 transition-all ${
                 pwLenError || pwSameError
                   ? "border-red-300 focus:border-red-500"
                   : "border-gray-300 focus:border-indigo-500"
@@ -266,53 +269,51 @@ const UbahPassword = () => {
             <button
               type="button"
               onClick={() => setShowNew((v) => !v)}
-              className="absolute right-2 top-1/2 -translate-y-1/2 p-2 text-gray-500 hover:text-gray-700"
-              title={showNew ? "Sembunyikan" : "Tampilkan"}
+              className="absolute right-2 top-1/2 -translate-y-1/2 p-2 text-gray-400 hover:text-gray-600 transition-colors"
             >
               {showNew ? <FaEyeSlash /> : <FaEye />}
             </button>
           </div>
 
           {!!pwLenError && (
-            <p className="mt-1 text-xs text-red-600">{pwLenError}</p>
+            <p className="mt-1 text-xs text-red-600 font-medium">{pwLenError}</p>
           )}
           {!!pwSameError && (
-            <p className="mt-1 text-xs text-red-600">{pwSameError}</p>
+            <p className="mt-1 text-xs text-red-600 font-medium">{pwSameError}</p>
           )}
 
           {/* Strength bar */}
-          <div className="mt-2">
-            <div className="flex gap-1">
+          <div className="mt-3">
+            <div className="flex gap-1.5 h-1.5 mb-1.5">
               {[0, 1, 2, 3].map((i) => (
                 <div
                   key={i}
-                  className={`h-1.5 flex-1 rounded-full ${
+                  className={`flex-1 rounded-full transition-all duration-300 ${
                     pwStrength > i ? "bg-indigo-500" : "bg-gray-200"
                   }`}
                 />
               ))}
             </div>
-            <p className="mt-1 text-xs text-gray-500">
-              Kekuatan: {strengthLabel(pwStrength)} • gunakan huruf besar, angka,
-              dan simbol biar kuat.
-            </p>
+            <div className="flex justify-between items-center text-xs text-gray-500">
+               <span>Kekuatan: <span className="font-semibold text-indigo-600">{strengthLabel(pwStrength)}</span></span>
+            </div>
           </div>
         </div>
 
         {/* Konfirmasi Password Baru */}
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">
+          <label className="block text-sm font-semibold text-gray-700 mb-1.5">
             Konfirmasi Password Baru
           </label>
-          <div className="relative">
-            <span className="absolute inset-y-0 left-0 pl-3 flex items-center text-gray-400">
+          <div className="relative group">
+            <span className="absolute inset-y-0 left-0 pl-3 flex items-center text-gray-400 group-focus-within:text-indigo-500 transition-colors">
               <FaKey />
             </span>
             <input
               type={showConf ? "text" : "password"}
               value={confirmNewPassword}
               onChange={(e) => setConfirmNewPassword(e.target.value)}
-              className={`block w-full pl-10 pr-10 py-2.5 border rounded-xl shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 ${
+              className={`block w-full pl-10 pr-10 py-2.5 border rounded-xl shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 transition-all ${
                 pwMatchError
                   ? "border-red-300 focus:border-red-500"
                   : "border-gray-300 focus:border-indigo-500"
@@ -323,19 +324,18 @@ const UbahPassword = () => {
             <button
               type="button"
               onClick={() => setShowConf((v) => !v)}
-              className="absolute right-2 top-1/2 -translate-y-1/2 p-2 text-gray-500 hover:text-gray-700"
-              title={showConf ? "Sembunyikan" : "Tampilkan"}
+              className="absolute right-2 top-1/2 -translate-y-1/2 p-2 text-gray-400 hover:text-gray-600 transition-colors"
             >
               {showConf ? <FaEyeSlash /> : <FaEye />}
             </button>
           </div>
           {!!pwMatchError && (
-            <p className="mt-1 text-xs text-red-600">{pwMatchError}</p>
+            <p className="mt-1 text-xs text-red-600 font-medium">{pwMatchError}</p>
           )}
         </div>
 
         {/* Actions */}
-        <div className="flex flex-col sm:flex-row items-center gap-2 pt-2">
+        <div className="flex flex-col sm:flex-row items-center gap-3 pt-4 border-t border-gray-100 mt-auto">
           <button
             type="submit"
             disabled={
@@ -345,30 +345,30 @@ const UbahPassword = () => {
               !!pwSameError ||
               !!pwMatchError
             }
-            className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-5 py-2.5 bg-indigo-600 text-white font-semibold rounded-xl hover:bg-indigo-700 transition disabled:opacity-50 disabled:cursor-not-allowed"
+            className="w-full sm:w-auto flex-1 inline-flex items-center justify-center gap-2 px-5 py-2.5 bg-indigo-600 text-white font-semibold rounded-xl hover:bg-indigo-700 active:bg-indigo-800 transition-all shadow-sm hover:shadow-md disabled:opacity-50 disabled:cursor-not-allowed disabled:shadow-none"
           >
             {isSaving ? (
               <FaSpinner className="animate-spin" />
             ) : (
               <FaCheckCircle />
             )}
-            {isSaving ? "Menyimpan..." : "Simpan Password Baru"}
+            {isSaving ? "Menyimpan..." : "Simpan Password"}
           </button>
 
           <button
             type="button"
             onClick={handleReset}
-            className="w-full sm:w-auto px-5 py-2.5 rounded-xl border border-gray-300 text-gray-700 hover:bg-gray-50 transition"
+            className="w-full sm:w-auto px-5 py-2.5 rounded-xl border border-gray-300 text-gray-700 font-medium hover:bg-gray-50 active:bg-gray-100 transition-colors"
           >
             Reset
           </button>
         </div>
 
         {/* Hint */}
-        <div className="mt-2 text-xs text-gray-500 flex items-start gap-2">
-          <FaExclamationTriangle className="mt-0.5" />
+        <div className="mt-3 p-3 bg-blue-50 rounded-lg text-xs text-blue-700 flex items-start gap-2 border border-blue-100">
+          <FaExclamationTriangle className="mt-0.5 flex-shrink-0" />
           <p>
-            Setelah password diubah, gunakan password baru saat login berikutnya.
+            Gunakan password baru anda saat login berikutnya demi keamanan akun.
           </p>
         </div>
       </form>
@@ -376,46 +376,65 @@ const UbahPassword = () => {
   );
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-white to-gray-50">
-      {/* Header Page */}
-      <div className="bg-white border-b border-gray-200 shadow-sm px-6 py-5 sticky top-0 z-40">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-indigo-600 text-white flex items-center justify-center shadow-sm">
-            <FaKey />
-          </div>
-          <div>
-            <h1 className="text-xl md:text-2xl font-bold text-gray-900">
-              Ubah Password
-            </h1>
-            <p className="text-sm text-gray-600">
-              Perbarui password akun anda untuk keamanan akses sistem.
-            </p>
-          </div>
+    <div className="min-h-screen bg-gray-50/50">
+      
+      {/* ===========================
+          NAVBAR (Sticky Top)
+      ============================ */}
+      <div className="bg-white/80 backdrop-blur-md shadow-sm border-b border-gray-200 py-4 pl-14 pr-4 md:px-8 sticky top-0 z-40 flex items-center gap-3 transition-all">
+        {/* Icon (Hidden di Mobile) */}
+        <div className="hidden md:flex w-10 h-10 rounded-xl bg-gradient-to-br from-indigo-500 to-indigo-700 text-white items-center justify-center shadow-md shadow-indigo-200">
+          <FaKey />
+        </div>
+        
+        <div>
+          <h1 className="text-xl md:text-2xl font-bold text-gray-900 tracking-tight">
+            Ubah Password
+          </h1>
+          <p className="hidden md:block text-sm text-gray-500">
+            Kelola keamanan akun dan akses sistem anda.
+          </p>
         </div>
       </div>
 
-      {/* Konten */}
-      <div className="p-6">
+      {/* Konten Utama */}
+      <div className="p-4 md:p-6 lg:p-8">
         <div className={containerClass}>
+          
           <MemoizedMessage {...msg} onDismiss={dismissMessage} />
 
-          {/* ✅ Layout Superadmin: kanan lebih lebar */}
+          {/* ✅ LOGIC UTAMA RESPONSIVE SUPERADMIN */}
           {isSuperadmin ? (
+            // Grid System:
+            // Mobile: 1 kolom
+            // Large Screen (lg): 12 kolom (Form 5, Table 7)
+            // Extra Large (xl): 12 kolom (Form 4, Table 8) -> Tabel lebih luas
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-              {/* kiri: form */}
-              <div className="lg:col-span-5 min-w-0">{FormUbahPassword}</div>
-
-              {/* kanan: permintaan reset (lebih lebar) */}
-              <div className="lg:col-span-7 min-w-0">
-                <PermintaanResetPassword />
+              
+              {/* KOLOM KIRI: Form Ubah Password */}
+              <div className="lg:col-span-5 xl:col-span-4 w-full">
+                {FormUbahPassword}
               </div>
+
+              {/* KOLOM KANAN: Permintaan Reset (Lebih lebar) */}
+              <div className="lg:col-span-7 xl:col-span-8 w-full min-w-0">
+                 {/* Wrapper tambahan untuk memastikan tabel tidak overflow layout */}
+                 <div className="h-full">
+                    <PermintaanResetPassword />
+                 </div>
+              </div>
+
             </div>
           ) : (
-            /* ✅ Layout Admin biasa: form di tengah */
+            
+            /* ✅ Tampilan Admin Biasa (Tengah) */
             <div className="flex justify-center">
-              <div className="w-full">{FormUbahPassword}</div>
+              <div className="w-full max-w-lg">
+                {FormUbahPassword}
+              </div>
             </div>
           )}
+
         </div>
       </div>
     </div>

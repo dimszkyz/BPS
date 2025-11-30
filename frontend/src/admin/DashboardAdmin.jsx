@@ -188,10 +188,7 @@ const DashboardAdmin = () => {
       // ---------------- UNDANGAN ----------------
       if (resUndangan.status === "fulfilled" && resUndangan.value.ok) {
         const dataUndangan = await resUndangan.value.json();
-        const myUndangan = dataUndangan.filter(
-          (inv) => Number(inv.admin_id) === Number(adminId)
-        );
-        totalUndangan = myUndangan.length;
+        totalUndangan = dataUndangan.length; 
       }
 
       setStats({ totalUjian, totalPeserta, totalUndangan });

@@ -77,7 +77,7 @@ const LupaPassword = () => {
     : "";
 
   const waError = !whatsapp.trim()
-    ? "Nomor WhatsApp wajib diisi. Untuk mendapatkan sandi baru."
+    ? "Nomor WhatsApp wajib diisi."
     : !/^\+?\d{9,15}$/.test(whatsapp.trim().replace(/\s/g, ""))
     ? "Format nomor WhatsApp tidak valid. Contoh: 08xxx / +628xxx"
     : "";
