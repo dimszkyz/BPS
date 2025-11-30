@@ -12,19 +12,54 @@ import {
   FaImage,
   FaCheckCircle,
   FaFileExcel,
-  FaSpinner, // Import icon loading/spinner
+  FaSpinner,
 } from "react-icons/fa";
 
 // --- UPDATE: Import helper dari TemplateExcel ---
-import { generateWorkbookFromState, downloadWorkbook } from "../admin/TemplateExcel";
-// Pastikan path "../admin/TemplateExcel" sesuai dengan struktur folder Anda.
+import {
+  generateWorkbookFromState,
+  downloadWorkbook,
+} from "../admin/TemplateExcel";
 
 const API_URL = "http://localhost:5000";
+
+// =======================================================
+// KONFIGURASI TIPE FILE (SAMA DENGAN TambahSoal.jsx)
+// =======================================================
+const FILE_TYPE_GROUPS = [
+  { label: "PDF (.pdf)", exts: [".pdf"] },
+  { label: "Word (.doc, .docx)", exts: [".doc", ".docx"] },
+  { label: "Excel (.xls, .xlsx)", exts: [".xls", ".xlsx"] },
+  { label: "Gambar (JPG/PNG)", exts: [".jpg", ".jpeg", ".png"] },
+  { label: "ZIP/RAR (.zip, .rar)", exts: [".zip", ".rar"] },
+];
+
+// Normalisasi allowedTypes dari DB / data lama:
+// - Pecah string yang pakai koma (".doc,docx")
+// - Pastikan ada "." di depan
+// - Lowercase & hilangkan duplikat
+const normalizeAllowedTypes = (raw) => {
+  if (!Array.isArray(raw)) return [];
+  const flat = [];
+
+  raw.forEach((item) => {
+    if (!item) return;
+    String(item)
+      .split(",")
+      .forEach((part) => {
+        let ext = part.trim().toLowerCase();
+        if (!ext) return;
+        if (!ext.startsWith(".")) ext = "." + ext;
+        if (!flat.includes(ext)) flat.push(ext);
+      });
+  });
+
+  return flat;
+};
 
 const EditSoal = () => {
   const { id } = useParams();
   const navigate = useNavigate();
-
   const location = useLocation();
   const isFromSuperAdmin = location.state?.fromSuperAdmin === true;
 
@@ -61,15 +96,15 @@ const EditSoal = () => {
 
         const localDate = data.tanggal
           ? new Date(data.tanggal).toLocaleDateString("en-CA", {
-            timeZone: "Asia/Jakarta",
-          })
+              timeZone: "Asia/Jakarta",
+            })
           : "";
         setTanggal(localDate);
 
         const localDateBerakhir = data.tanggal_berakhir
           ? new Date(data.tanggal_berakhir).toLocaleDateString("en-CA", {
-            timeZone: "Asia/Jakarta",
-          })
+              timeZone: "Asia/Jakarta",
+            })
           : "";
         setTanggalBerakhir(localDateBerakhir);
 
@@ -87,20 +122,22 @@ const EditSoal = () => {
             tipeSoal: s.tipeSoal,
             soalText: s.soalText,
             gambar: s.gambar || null,
-            gambarPreview: s.gambar ? `${API_URL}/api/ujian${s.gambar}` : null,
+            gambarPreview: s.gambar
+              ? `${API_URL}/api/ujian${s.gambar}`
+              : null,
 
-            // --- MAP DATA CONFIG ---
-            allowedTypes: s.allowedTypes || [],
+            // --- MAP DATA CONFIG & NORMALISASI TIPE FILE ---
+            allowedTypes: normalizeAllowedTypes(s.allowedTypes || []),
             maxSize: s.maxSize || 5,
             maxCount: s.maxCount || 1,
-            // -----------------------
+            // ------------------------------------------------
 
             pilihan:
               s.tipeSoal === "pilihanGanda"
                 ? (s.pilihan || []).map((p) => ({
-                  id: p.id,
-                  text: p.text,
-                }))
+                    id: p.id,
+                    text: p.text,
+                  }))
                 : [],
             kunciJawaban:
               s.tipeSoal === "pilihanGanda"
@@ -118,11 +155,12 @@ const EditSoal = () => {
         setLoading(false);
       }
     };
+
     fetchDetail();
   }, [id]);
 
   // =======================================================
-  // ▼▼▼ EXPORT UJIAN (UPDATE SKEMA BARU) ▼▼▼
+  // ▼▼▼ EXPORT UJIAN ▼▼▼
   // =======================================================
   const handleExportUjianSoalExcel = () => {
     const dataToExport = {
@@ -185,7 +223,6 @@ const EditSoal = () => {
         ],
         kunciJawaban: newPilId1,
         kunciJawabanText: "",
-        // Default config
         allowedTypes: [],
         maxSize: 5,
         maxCount: 1,
@@ -208,18 +245,33 @@ const EditSoal = () => {
     setDaftarSoal(updated);
   };
 
-  const handleAllowedTypeChange = (soalId, type) => {
+  // =======================================================
+  // HANDLE TIPE FILE DOKUMEN (DISESUAIKAN DENGAN TambahSoal)
+  // exts = array, misal [".pdf"] atau [".doc", ".docx"]
+  // =======================================================
+  const handleAllowedTypeChange = (soalId, exts) => {
     setDaftarSoal((prev) =>
       prev.map((s) => {
-        if (s.id === soalId) {
-          const currentTypes = s.allowedTypes || [];
-          if (currentTypes.includes(type)) {
-            return { ...s, allowedTypes: currentTypes.filter((t) => t !== type) };
-          } else {
-            return { ...s, allowedTypes: [...currentTypes, type] };
-          }
+        if (s.id !== soalId) return s;
+
+        const current = s.allowedTypes || [];
+        const hasAny = exts.some((ext) => current.includes(ext));
+
+        let next = [...current];
+
+        if (hasAny) {
+          // Jika salah satu ext di grup sudah ada -> hapus semua ext di grup itu
+          next = next.filter((ext) => !exts.includes(ext));
+        } else {
+          // Jika belum ada -> tambahkan semua ext di grup tersebut
+          exts.forEach((ext) => {
+            if (!next.includes(ext)) {
+              next.push(ext);
+            }
+          });
         }
-        return s;
+
+        return { ...s, allowedTypes: next };
       })
     );
   };
@@ -229,12 +281,12 @@ const EditSoal = () => {
       prev.map((s) =>
         s.id === soalId
           ? {
-            ...s,
-            pilihan: [
-              ...s.pilihan,
-              { id: `new_pil_${Date.now()}`, text: "" },
-            ],
-          }
+              ...s,
+              pilihan: [
+                ...s.pilihan,
+                { id: `new_pil_${Date.now()}`, text: "" },
+              ],
+            }
           : s
       )
     );
@@ -268,11 +320,11 @@ const EditSoal = () => {
       prev.map((s) =>
         s.id === soalId
           ? {
-            ...s,
-            pilihan: s.pilihan.map((p) =>
-              p.id === pilihanId ? { ...p, text } : p
-            ),
-          }
+              ...s,
+              pilihan: s.pilihan.map((p) =>
+                p.id === pilihanId ? { ...p, text } : p
+              ),
+            }
           : s
       )
     );
@@ -318,10 +370,8 @@ const EditSoal = () => {
         s.tipeSoal === "pilihanGanda"
           ? s.pilihan.find((p) => p.id === s.kunciJawaban)?.text || ""
           : s.tipeSoal === "teksSingkat"
-            ? s.kunciJawabanText || ""
-            : "",
-
-      // Kirim Config
+          ? s.kunciJawabanText || ""
+          : "",
       allowedTypes: s.tipeSoal === "soalDokumen" ? s.allowedTypes : [],
       maxSize: s.tipeSoal === "soalDokumen" ? s.maxSize : 0,
       maxCount: s.tipeSoal === "soalDokumen" ? s.maxCount : 0,
@@ -397,10 +447,7 @@ const EditSoal = () => {
 
   return (
     <div className="bg-gray-50 min-h-screen flex flex-col pb-10">
-
-      {/* =======================================================
-          ▼▼▼ NOTIFIKASI SUKSES (RESPONSIVE + SPINNER) ▼▼▼
-      ======================================================= */}
+      {/* NOTIFIKASI SUKSES */}
       {successMessage && (
         <div className="fixed top-24 left-1/2 -translate-x-1/2 z-[100] w-[90%] md:w-full max-w-lg px-2 sm:px-4 transition-all duration-300">
           <div className="flex items-center justify-between gap-4 bg-green-600 text-white px-5 py-4 rounded-xl shadow-2xl animate-bounce-in border border-green-500 backdrop-blur-sm bg-opacity-95">
@@ -410,7 +457,6 @@ const EditSoal = () => {
                 {successMessage}
               </span>
             </div>
-            {/* ICON MUTER / SPINNER */}
             <div className="flex items-center gap-2 pl-2 border-l border-green-400/50">
               <FaSpinner className="w-5 h-5 text-white animate-spin flex-shrink-0" />
             </div>
@@ -418,19 +464,15 @@ const EditSoal = () => {
         </div>
       )}
 
-      {/* ===========================
-          NAVBAR (Sticky Top)
-      ============================ */}
+      {/* NAVBAR */}
       <div className="bg-white shadow-sm border-b border-gray-300 py-4 pl-14 pr-4 md:px-8 md:py-5 sticky top-0 z-50 flex justify-between items-center transition-all">
         <h2 className="text-xl md:text-2xl font-semibold text-gray-900 flex items-center gap-2">
-          {/* Ikon Puzzle disembunyikan di mobile */}
           <span className="hidden md:inline-block text-blue-600 text-2xl">
             🧩
           </span>
           <span>Edit Ujian</span>
         </h2>
 
-        {/* TOMBOL AKSI - HANYA TAMPIL DI DESKTOP/TABLET (md ke atas) */}
         <div className="hidden md:flex gap-2 items-center">
           <button
             type="button"
@@ -462,12 +504,9 @@ const EditSoal = () => {
         </div>
       </div>
 
-      {/* ===========================
-          KONTEN UTAMA
-      ============================ */}
+      {/* KONTEN UTAMA */}
       <div className="p-4 md:p-10 overflow-y-auto">
-
-        {/* MENU AKSI MOBILE (Hanya tampil di layar HP < md) */}
+        {/* MENU AKSI MOBILE */}
         <div className="md:hidden mb-6 bg-white rounded-xl border border-gray-200 shadow-sm p-4">
           <h3 className="text-sm font-semibold text-gray-700 mb-3 border-b border-gray-100 pb-2">
             Menu Aksi Cepat
@@ -665,7 +704,9 @@ const EditSoal = () => {
                 <input
                   type="file"
                   accept="image/*"
-                  onChange={(e) => handleFileChange(soal.id, e.target.files[0])}
+                  onChange={(e) =>
+                    handleFileChange(soal.id, e.target.files[0])
+                  }
                   className="block text-sm border border-gray-300 rounded-md p-1 w-full"
                 />
                 {soal.gambarPreview && (
@@ -751,24 +792,18 @@ const EditSoal = () => {
                       Tipe File yang Diizinkan:
                     </label>
                     <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-                      {[
-                        { label: "PDF (.pdf)", val: ".pdf" },
-                        { label: "Word (.doc, .docx)", val: ".doc,.docx" },
-                        { label: "Excel (.xls, .xlsx)", val: ".xls,.xlsx" },
-                        { label: "Gambar (JPG/PNG)", val: ".jpg,.jpeg,.png" },
-                        { label: "ZIP/RAR", val: ".zip,.rar" },
-                      ].map((type) => (
+                      {FILE_TYPE_GROUPS.map((type) => (
                         <label
-                          key={type.val}
+                          key={type.label}
                           className="flex items-center space-x-2 text-sm bg-white p-2 rounded border border-gray-200"
                         >
                           <input
                             type="checkbox"
-                            checked={(soal.allowedTypes || []).includes(
-                              type.val
+                            checked={(soal.allowedTypes || []).some((ext) =>
+                              type.exts.includes(ext)
                             )}
                             onChange={() =>
-                              handleAllowedTypeChange(soal.id, type.val)
+                              handleAllowedTypeChange(soal.id, type.exts)
                             }
                             className="rounded text-purple-600 focus:ring-purple-500"
                           />
@@ -828,7 +863,7 @@ const EditSoal = () => {
                 </div>
               )}
 
-              {/* Pilihan */}
+              {/* Pilihan PG */}
               {soal.tipeSoal === "pilihanGanda" && (
                 <div className="mt-5 border-t border-gray-200 pt-4">
                   <h4 className="text-base font-semibold text-gray-800 mb-2">

@@ -13,6 +13,8 @@ import {
   FaFileExcel,
   FaDownload,
   FaUpload,
+  FaExclamationCircle, // Icon untuk error
+  FaTimes, // Icon untuk tutup alert
 } from "react-icons/fa";
 
 // Import logika Excel dari file baru
@@ -49,6 +51,8 @@ const TambahSoal = () => {
   const [acakOpsi, setAcakOpsi] = useState(false);
 
   const [successMessage, setSuccessMessage] = useState("");
+  const [errorMessage, setErrorMessage] = useState("");
+
   const [daftarSoal, setDaftarSoal] = useState([
     {
       id: 1,
@@ -70,6 +74,25 @@ const TambahSoal = () => {
   ]);
 
   const excelInputRef = useRef(null);
+
+  // --- Helper Show Alert & Scroll ---
+  const scrollToTop = () => {
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+
+  const showError = (msg) => {
+    setErrorMessage(msg);
+    setSuccessMessage(""); // Clear success msg jika ada error baru
+    scrollToTop();
+  };
+
+  const showSuccess = (msg) => {
+    setSuccessMessage(msg);
+    setErrorMessage(""); // Clear error msg jika sukses
+    scrollToTop();
+    // Auto hide setelah 5 detik (opsional, bisa dihapus jika ingin menetap)
+    setTimeout(() => setSuccessMessage(""), 5000);
+  };
 
   // --- Logic State Management Form ---
 
@@ -122,10 +145,8 @@ const TambahSoal = () => {
         let next = [...current];
 
         if (hasAny) {
-          // Jika grup sedang aktif, uncheck = hapus semua ekstensi di grup
           next = next.filter((ext) => !exts.includes(ext));
         } else {
-          // Jika grup belum aktif, check = tambahkan semua ekstensi di grup
           exts.forEach((ext) => {
             if (!next.includes(ext)) {
               next.push(ext);
@@ -140,7 +161,7 @@ const TambahSoal = () => {
 
   const handleHapusSoal = (id) => {
     if (daftarSoal.length <= 1) {
-      alert("Minimal harus ada satu soal.");
+      showError("Minimal harus ada satu soal.");
       return;
     }
     setDaftarSoal(daftarSoal.filter((s) => s.id !== id));
@@ -171,7 +192,7 @@ const TambahSoal = () => {
       prev.map((s) => {
         if (s.id === soalId) {
           if (s.pilihan.length <= 2) {
-            alert("Minimal harus ada 2 pilihan.");
+            showError("Minimal harus ada 2 pilihan.");
             return s;
           }
           const newPilihan = s.pilihan.filter((p) => p.id !== pilihanId);
@@ -235,33 +256,33 @@ const TambahSoal = () => {
   };
 
   const handleImportExcelFile = async (file) => {
-  try {
-    const { settings, soalList } = await parseWorkbookToState(file);
-    if (settings) {
-      setKeterangan(settings.keterangan);
-      setTanggal(settings.tanggal);
-      setTanggalBerakhir(settings.tanggalBerakhir);
-      setJamMulai(settings.jamMulai);
-      setJamBerakhir(settings.jamBerakhir);
-      setDurasi(settings.durasi);
-      setAcakSoal(settings.acakSoal);
-      setAcakOpsi(settings.acakOpsi);
+    setErrorMessage("");
+    setSuccessMessage("");
+    
+    try {
+      const { settings, soalList } = await parseWorkbookToState(file);
+      if (settings) {
+        setKeterangan(settings.keterangan);
+        setTanggal(settings.tanggal);
+        setTanggalBerakhir(settings.tanggalBerakhir);
+        setJamMulai(settings.jamMulai);
+        setJamBerakhir(settings.jamBerakhir);
+        setDurasi(settings.durasi);
+        setAcakSoal(settings.acakSoal);
+        setAcakOpsi(settings.acakOpsi);
+      }
+      if (soalList && soalList.length > 0) {
+        setDaftarSoal(soalList);
+        // Tampilkan pesan sukses di banner
+        showSuccess(`Berhasil import ${soalList.length} soal dari Excel.`);
+      } else {
+        showError("File Excel tidak berisi soal yang valid.");
+      }
+    } catch (err) {
+      console.error(err);
+      showError("Gagal membaca file Excel. Pastikan formatnya sesuai template.");
     }
-    if (soalList && soalList.length > 0) {
-      setDaftarSoal(soalList);
-
-      // ✅ Ganti alert dengan banner sukses yang bagus
-      setSuccessMessage(`Berhasil import ${soalList.length} soal dari Excel.`);
-      setTimeout(() => setSuccessMessage(""), 5000);
-    } else {
-      alert("File Excel tidak berisi soal yang valid.");
-    }
-  } catch (err) {
-    console.error(err);
-    alert("Gagal membaca file Excel. Pastikan formatnya sesuai template.");
-  }
-};
-
+  };
 
   const handleClickImport = () => {
     if (excelInputRef.current) excelInputRef.current.click();
@@ -270,17 +291,18 @@ const TambahSoal = () => {
   // === SUBMIT TO SERVER ===
   const handleSubmit = async (e) => {
     e.preventDefault();
+    setErrorMessage("");
 
     if (!jamMulai || !jamBerakhir) {
-      alert("Jam mulai dan jam berakhir wajib diisi.");
+      showError("Jam mulai dan jam berakhir wajib diisi.");
       return;
     }
     if (!tanggalBerakhir) {
-      alert("Tanggal berakhir wajib diisi.");
+      showError("Tanggal berakhir wajib diisi.");
       return;
     }
     if (!durasi || parseInt(durasi, 10) <= 0) {
-      alert("Durasi pengerjaan wajib diisi dan harus lebih dari 0.");
+      showError("Durasi pengerjaan wajib diisi dan harus lebih dari 0.");
       return;
     }
 
@@ -334,8 +356,8 @@ const TambahSoal = () => {
       const json = await res.json();
       if (!res.ok) throw new Error(json.message || "Gagal menyimpan ujian");
 
-      setSuccessMessage("Ujian Berhasil Disimpan");
-      setTimeout(() => setSuccessMessage(""), 7000);
+      // Tampilkan pesan sukses di banner
+      showSuccess("Ujian Berhasil Disimpan");
 
       // Reset form
       setKeterangan("");
@@ -368,7 +390,7 @@ const TambahSoal = () => {
       ]);
     } catch (err) {
       console.error("Error:", err);
-      alert("Terjadi kesalahan: " + err.message);
+      showError("Terjadi kesalahan: " + err.message);
     }
   };
 
@@ -383,15 +405,7 @@ const TambahSoal = () => {
 
   return (
     <div className="bg-gray-50 min-h-screen pb-10">
-      {/* TOAST SUCCESS */}
-      {successMessage && (
-        <div className="fixed top-20 left-1/2 -translate-x-1/2 z-[100] w-full max-w-sm px-4">
-          <div className="flex items-center gap-3 bg-green-600 text-white px-5 py-3 rounded-lg shadow-lg animate-bounce-in">
-            <FaCheckCircle className="text-white w-5 h-5 flex-shrink-0" />
-            <span className="font-semibold text-sm">{successMessage}</span>
-          </div>
-        </div>
-      )}
+      {/* (TOAST FIXED DIHAPUS) - Pesan Sukses dipindah ke dalam form di bawah */}
 
       {/* INPUT FILE HIDDEN */}
       <input
@@ -412,15 +426,13 @@ const TambahSoal = () => {
       <div className="bg-white shadow-sm border-b border-gray-300 py-4 pl-14 pr-4 md:px-8 md:py-5 sticky top-0 z-50 flex flex-wrap gap-y-3 justify-between items-center transition-all">
         {/* JUDUL HALAMAN */}
         <h2 className="text-xl md:text-2xl font-semibold text-gray-900 flex items-center gap-2">
-          {/* Icon disembunyikan di mobile (hidden), muncul di md ke atas */}
           <span className="hidden md:inline-block text-blue-600 text-2xl">
             🧩
           </span>
           <span>Tambah Ujian</span>
         </h2>
 
-        {/* TOMBOL AKSI - HANYA TAMPIL DI DESKTOP/TABLET (md ke atas) */}
-        {/* Menggunakan 'flex-wrap' agar aman saat dibuka di tablet portrait */}
+        {/* TOMBOL AKSI */}
         <div className="hidden md:flex gap-2 flex-wrap items-center justify-end">
           <button
             type="button"
@@ -465,7 +477,7 @@ const TambahSoal = () => {
       ============================ */}
       <div className="p-4 md:p-10">
         
-        {/* MENU AKSI MOBILE (Hanya tampil di layar HP < md) */}
+        {/* MENU AKSI MOBILE */}
         <div className="md:hidden mb-6 bg-white rounded-xl border border-gray-200 shadow-sm p-4">
           <h3 className="text-sm font-semibold text-gray-700 mb-3 border-b border-gray-100 pb-2">
             Menu Aksi Cepat
@@ -515,6 +527,46 @@ const TambahSoal = () => {
           onSubmit={handleSubmit}
           className="space-y-8 max-w-5xl mx-auto"
         >
+          {/* ----- ALERT / BANNER SUCCESS DISINI ----- */}
+          {successMessage && (
+            <div className="bg-green-50 border-l-4 border-green-500 p-4 rounded-md shadow-sm mb-6 flex items-start justify-between animate-fade-in">
+              <div className="flex items-start gap-3">
+                <FaCheckCircle className="text-green-500 text-xl mt-0.5 flex-shrink-0" />
+                <div>
+                  <h4 className="text-green-800 font-bold text-sm">Berhasil</h4>
+                  <p className="text-green-700 text-sm mt-1">{successMessage}</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSuccessMessage("")}
+                className="text-green-400 hover:text-green-600 transition"
+              >
+                <FaTimes />
+              </button>
+            </div>
+          )}
+
+          {/* ----- ALERT / BANNER ERROR DISINI ----- */}
+          {errorMessage && (
+            <div className="bg-red-50 border-l-4 border-red-500 p-4 rounded-md shadow-sm mb-6 flex items-start justify-between animate-fade-in">
+              <div className="flex items-start gap-3">
+                <FaExclamationCircle className="text-red-500 text-xl mt-0.5 flex-shrink-0" />
+                <div>
+                  <h4 className="text-red-800 font-bold text-sm">Terjadi Kesalahan / Perhatian</h4>
+                  <p className="text-red-700 text-sm mt-1">{errorMessage}</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setErrorMessage("")}
+                className="text-red-400 hover:text-red-600 transition"
+              >
+                <FaTimes />
+              </button>
+            </div>
+          )}
+
           {/* PENGATURAN UJIAN */}
           <fieldset className={fieldsetClass}>
             <div className="flex items-center gap-2 mb-5 border-b pb-2 border-gray-200">

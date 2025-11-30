@@ -60,6 +60,7 @@ const excelTimeToHHMM = (val) => {
     return `${pad2(hh)}:${pad2(mm)}`;
   }
   const s = String(val).trim();
+  // Match HH:MM or H:MM
   const m = s.match(/^(\d{1,2})[:.](\d{1,2})/);
   if (m) return `${pad2(m[1])}:${pad2(m[2])}`;
   return s;
@@ -71,9 +72,10 @@ const excelBoolToJS = (val) => {
   return false;
 };
 
+// Normalisasi Tipe Soal agar Import tidak lari ke Pilihan Ganda
 const normalizeTipe = (raw) => {
   const v = String(raw || "").trim().toLowerCase();
-  if (!v) return "pilihanGanda";
+  if (!v) return "pilihanGanda"; // Default
 
   // Variasi Pilihan Ganda
   if (
@@ -83,6 +85,7 @@ const normalizeTipe = (raw) => {
       "pilihan ganda",
       "pilihan_ganda",
       "multiple choice",
+      "multiplechoice",
     ].includes(v)
   )
     return "pilihanGanda";
@@ -94,8 +97,11 @@ const normalizeTipe = (raw) => {
       "singkat",
       "teks singkat",
       "teks_singkat",
+      "tekssingkat",
       "short answer",
+      "shortanswer",
       "isian",
+      "jawaban singkat",
     ].includes(v)
   )
     return "teksSingkat";
@@ -113,6 +119,7 @@ const normalizeTipe = (raw) => {
       "soaldokumen",
       "upload",
       "file",
+      "upload file",
     ].includes(v)
   )
     return "soalDokumen";
@@ -120,27 +127,59 @@ const normalizeTipe = (raw) => {
   return "pilihanGanda";
 };
 
+// Helper untuk parsing kunci jawaban PG (Angka/Huruf -> Index 1-5)
 const parseKunciPG = (rawKunci, pilihanTexts) => {
   const v = String(rawKunci || "").trim();
   if (!v) return 1;
 
-  // Cek jika angka
+  // Cek jika input adalah angka (1, 2, 3...)
   const num = parseInt(v, 10);
-  if (!Number.isNaN(num) && num >= 1 && num <= pilihanTexts.length) return num;
+  if (!Number.isNaN(num)) {
+      // Pastikan index valid sesuai jumlah pilihan
+      if (num >= 1 && num <= Math.max(pilihanTexts.length, 5)) return num;
+  }
 
   // Cek jika huruf (A, B, C...)
-  const letterMap = { A: 1, B: 2, C: 3, D: 4, E: 5 };
-  const up = v.toUpperCase();
-  if (letterMap[up] && letterMap[up] <= pilihanTexts.length)
-    return letterMap[up];
+  const letterMap = { A: 1, B: 2, C: 3, D: 4, E: 5, a: 1, b: 2, c: 3, d: 4, e: 5 };
+  if (letterMap[v]) return letterMap[v];
 
-  // Cek jika teks jawaban langsung
+  // Cek jika teks jawaban langsung ditulis di kolom kunci
   const idx = pilihanTexts.findIndex(
     (p) => String(p).trim().toLowerCase() === v.toLowerCase()
   );
   if (idx !== -1) return idx + 1;
 
-  return 1;
+  return 1; // Default ke pilihan 1 jika gagal parse
+};
+
+// --- [FIX BUG 1] Helper Baru: Membersihkan List File ---
+// Fungsi ini memecah string yang tergabung (misal ".doc, .docx")
+// dan menghapus duplikat agar hasil export Excel rapi.
+const cleanAndFormatAllowedTypes = (typesArray) => {
+  if (!Array.isArray(typesArray) || typesArray.length === 0) return "";
+  
+  const flatList = [];
+  
+  // 1. Flatten & Split: Jika ada item yg tergabung
+  typesArray.forEach(item => {
+     const sItem = String(item);
+     if (sItem.includes(',')) {
+        const splits = sItem.split(',').map(s => s.trim());
+        flatList.push(...splits);
+     } else {
+        flatList.push(sItem.trim());
+     }
+  });
+
+  // 2. Filter & Unique: Hanya ambil yg valid dan buang duplikat
+  const uniqueTypes = [...new Set(
+    flatList
+      .map(t => t.toLowerCase())
+      .filter(t => ALL_EXTENSIONS.includes(t))
+  )];
+
+  // 3. Gabung string dengan spasi yang rapi
+  return uniqueTypes.join(", ");
 };
 
 // ==========================================
@@ -176,6 +215,7 @@ export const buildTemplateWorkbook = () => {
     "maxCount",
   ];
 
+  // Contoh data dummy untuk template
   const contohSoal = [
     {
       tipeSoal: "pilihanGanda",
@@ -201,7 +241,7 @@ export const buildTemplateWorkbook = () => {
       pilihan3: "",
       pilihan4: "",
       pilihan5: "",
-      kunciJawaban: "Soekarno, Ir Soekarno",
+      kunciJawaban: "Soekarno, Bung Karno",
       gambarUrl: "",
       allowedTypes: "",
       maxSize: "",
@@ -225,7 +265,7 @@ export const buildTemplateWorkbook = () => {
     {
       tipeSoal: "soalDokumen",
       bobot: 10,
-      soalText: "Upload bukti pendukung (Bisa PDF, Gambar, atau ZIP).",
+      soalText: "Upload bukti pendukung (Bisa PDF atau Word).",
       pilihan1: "",
       pilihan2: "",
       pilihan3: "",
@@ -233,14 +273,19 @@ export const buildTemplateWorkbook = () => {
       pilihan5: "",
       kunciJawaban: "",
       gambarUrl: "",
-      allowedTypes: ".pdf, .jpg, .png, .zip, .doc, .docx",
+      allowedTypes: ".pdf, .doc, .docx",
       maxSize: 10,
-      maxCount: 3,
+      maxCount: 1,
     },
   ];
 
   const wsSoal = XLSX.utils.json_to_sheet(contohSoal, { header: soalHeaders });
-  XLSX.utils.sheet_add_aoa(wsSoal, [soalHeaders], { origin: "A1" });
+  // Set lebar kolom agar rapi
+  wsSoal["!cols"] = [
+      { wch: 15 }, { wch: 5 }, { wch: 30 }, { wch: 15 }, { wch: 15 }, 
+      { wch: 15 }, { wch: 15 }, { wch: 15 }, { wch: 15 }, { wch: 20 },
+      { wch: 20 }, { wch: 8 }, { wch: 8 }
+  ];
 
   // --- Sheet PENGATURAN_UJIAN ---
   const settingHeaders = [
@@ -272,7 +317,7 @@ export const buildTemplateWorkbook = () => {
   });
   XLSX.utils.sheet_add_aoa(wsSetting, [settingHeaders], { origin: "A1" });
 
-  // --- Sheet PETUNJUK (YANG DIPERBAIKI SANGAT LENGKAP) ---
+  // --- Sheet PETUNJUK (TETAP LENGKAP) ---
   const petunjuk = [
     ["PETUNJUK PENGISIAN TEMPLATE EXCEL"],
     [""],
@@ -316,8 +361,6 @@ export const buildTemplateWorkbook = () => {
   ];
 
   const wsPetunjuk = XLSX.utils.aoa_to_sheet(petunjuk);
-
-  // Atur lebar kolom agar petunjuk terbaca enak
   wsPetunjuk["!cols"] = [{ wch: 100 }];
 
   const wb = XLSX.utils.book_new();
@@ -329,7 +372,7 @@ export const buildTemplateWorkbook = () => {
 };
 
 // =========================================================
-// FUNGSI INI YANG DIUPDATE UTK EXPORT ID -> ANGKA (1,2,3..)
+// 4. GENERATE WORKBOOK (EXPORT DATA)
 // =========================================================
 export const generateWorkbookFromState = (data) => {
   const {
@@ -396,45 +439,36 @@ export const generateWorkbookFromState = (data) => {
         ? s.pilihan.map((p) => p.text)
         : [];
 
-    // --- LOGIKA KUNCI JAWABAN (FIXED) ---
-    // Mengubah ID Unik menjadi urutan angka (1, 2, 3...)
-    let kunci = "";
+    // B. Kunci Jawaban Export Logic
+    let kunciExport = "";
     if (s.tipeSoal === "pilihanGanda") {
       if (Array.isArray(s.pilihan)) {
-        // Cari index dari ID yang terpilih
         const idx = s.pilihan.findIndex((p) => p.id === s.kunciJawaban);
         if (idx !== -1) {
-          // Jika ketemu, ambil urutan (0 -> 1, 1 -> 2, dst)
-          kunci = String(idx + 1);
-        } else {
-          // Fallback jika ID tidak ditemukan (atau data lama)
-          kunci = "";
+          kunciExport = String(idx + 1);
         }
       }
     } else if (s.tipeSoal === "teksSingkat") {
-      kunci = s.kunciJawabanText || "";
+      kunciExport = s.kunciJawabanText || "";
     }
-    // ------------------------------------
-
-    // Allowed Types menjadi String
-    const typesString =
-      s.tipeSoal === "soalDokumen" && Array.isArray(s.allowedTypes)
-        ? s.allowedTypes.join(", ")
-        : "";
+    
+    // --- [FIX BUG 1] Export Tipe File ---
+    // Menggunakan fungsi cleanAndFormatAllowedTypes agar tidak double
+    let typesString = "";
+    if (s.tipeSoal === "soalDokumen" && Array.isArray(s.allowedTypes)) {
+       typesString = cleanAndFormatAllowedTypes(s.allowedTypes);
+    }
 
     return {
       tipeSoal: s.tipeSoal,
-      bobot: (() => {
-        const val = parseInt(s.bobot, 10);
-        return Number.isNaN(val) ? 1 : val;
-      })(),
+      bobot: parseInt(s.bobot, 10) || 1,
       soalText: s.soalText || "",
       pilihan1: pilihanTexts[0] || "",
       pilihan2: pilihanTexts[1] || "",
       pilihan3: pilihanTexts[2] || "",
       pilihan4: pilihanTexts[3] || "",
       pilihan5: pilihanTexts[4] || "",
-      kunciJawaban: kunci, // Menggunakan hasil konversi ID -> Angka
+      kunciJawaban: kunciExport,
       gambarUrl: s.gambarPreview && !s.gambar ? s.gambarPreview : "",
       allowedTypes: typesString,
       maxSize: s.maxSize || "",
@@ -452,7 +486,9 @@ export const generateWorkbookFromState = (data) => {
   return wb;
 };
 
-// Fungsi Import: Parsing File Excel ke Object Data (State React)
+// =========================================================
+// 5. PARSE WORKBOOK (IMPORT DATA)
+// =========================================================
 export const parseWorkbookToState = async (file) => {
   const buffer = await file.arrayBuffer();
   const wb = XLSX.read(buffer, { type: "array", cellDates: true });
@@ -462,7 +498,7 @@ export const parseWorkbookToState = async (file) => {
     soalList: [],
   };
 
-  // 1. Import Pengaturan
+  // --- A. Import Pengaturan ---
   const settingSheetName =
     wb.SheetNames.find((n) => n.toLowerCase() === "pengaturan_ujian") ||
     wb.SheetNames[0];
@@ -501,7 +537,7 @@ export const parseWorkbookToState = async (file) => {
     }
   }
 
-  // 2. Import Soal
+  // --- B. Import Soal ---
   let soalSheetName = wb.SheetNames.find((n) =>
     ["template_soal", "soal", "daftar_soal"].includes(n.toLowerCase())
   );
@@ -515,7 +551,7 @@ export const parseWorkbookToState = async (file) => {
   const wsSoal = wb.Sheets[soalSheetName];
   const json = XLSX.utils.sheet_to_json(wsSoal, { defval: "" });
 
-  let idCounter = 1;
+  let idCounter = Date.now();
   const importedSoal = [];
 
   for (const row of json) {
@@ -538,10 +574,8 @@ export const parseWorkbookToState = async (file) => {
 
     if (!String(soalText).trim()) continue;
 
-    // -- PARSING FIELDS --
     const rawBobot = lowerRow["bobot"] || lowerRow["nilai"] || 1;
     const bobot = parseInt(rawBobot, 10) || 1;
-
     const gambarUrl = lowerRow["gambarurl"] || lowerRow["gambar_url"] || "";
 
     // Pilihan Ganda Logic
@@ -552,7 +586,6 @@ export const parseWorkbookToState = async (file) => {
           lowerRow[`pilihan${i}`] ||
           lowerRow[`opsi${i}`] ||
           lowerRow[`pilihan ${i}`] ||
-          lowerRow[`opsi ${i}`] ||
           "";
         if (String(val).trim()) pilihanTexts.push(String(val));
       }
@@ -561,6 +594,9 @@ export const parseWorkbookToState = async (file) => {
           pilihanTexts.push("Pilihan A", "Pilihan B");
         else if (pilihanTexts.length === 1) pilihanTexts.push("");
       }
+    } else {
+        // Dummy data untuk non-PG agar UI tidak crash
+        pilihanTexts.push("", ""); 
     }
 
     const kunciRaw =
@@ -569,7 +605,20 @@ export const parseWorkbookToState = async (file) => {
       lowerRow["jawaban"] ||
       "";
 
-    // -- DOKUMEN TYPE LOGIC --
+    // --- [FIX BUG 2] Kunci Jawaban Import Logic ---
+    // Pisahkan logika. Jangan set '1' (Int) jika bukan Pilihan Ganda.
+    // Jika tidak dipisah, Teks Singkat akan terbaca sebagai Pilihan Ganda karena punya nilai ID.
+    
+    let finalKunciPG = null;
+    let finalKunciText = "";
+
+    if (tipeSoal === "pilihanGanda") {
+        finalKunciPG = parseKunciPG(kunciRaw, pilihanTexts);
+    } else if (tipeSoal === "teksSingkat") {
+        finalKunciText = String(kunciRaw);
+    }
+
+    // Dokumen Type Logic
     let allowedTypes = [];
     let maxSize = 5;
     let maxCount = 1;
@@ -582,18 +631,16 @@ export const parseWorkbookToState = async (file) => {
         "";
 
       if (String(rawTypes).trim()) {
-        // Split koma, trim spasi, lowercase, dan pastikan diawali titik
         allowedTypes = String(rawTypes)
           .split(",")
           .map((t) => {
             let clean = t.trim().toLowerCase();
-            // Jika user lupa titik (misal "pdf"), tambahkan titik (".pdf")
             if (clean && !clean.startsWith(".")) {
               clean = "." + clean;
             }
             return clean;
           })
-          .filter((t) => ALL_EXTENSIONS.includes(t)); // Validasi hanya tipe yang didukung
+          .filter((t) => ALL_EXTENSIONS.includes(t));
       }
 
       maxSize = parseInt(
@@ -614,20 +661,12 @@ export const parseWorkbookToState = async (file) => {
       gambar: null,
       gambarPreview: String(gambarUrl).trim() || null,
 
-      pilihan:
-        tipeSoal === "pilihanGanda"
-          ? pilihanTexts.map((t, idx) => ({ id: idx + 1, text: t }))
-          : [
-              { id: 1, text: "" },
-              { id: 2, text: "" },
-            ],
+      pilihan: pilihanTexts.map((t, idx) => ({ id: idx + 1, text: t })),
 
-      kunciJawaban:
-        tipeSoal === "pilihanGanda" ? parseKunciPG(kunciRaw, pilihanTexts) : 1,
-      kunciJawabanText:
-        tipeSoal === "teksSingkat" ? String(kunciRaw) : "",
+      // PENTING: Assign kunciJawaban sesuai tipenya
+      kunciJawaban: finalKunciPG,       // Int (Khusus PG)
+      kunciJawabanText: finalKunciText, // String (Khusus Teks Singkat)
 
-      // Fields Dokumen
       allowedTypes,
       maxSize,
       maxCount,
