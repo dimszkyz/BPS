@@ -1,8 +1,4 @@
 // File: src/admin/HasilUjian.jsx
-// (UI diperbarui: header elegan, dropdown pilih ujian, search, sorting, pagination,
-//  progress bar nilai, ringkasan statistik, 1 tombol "Export Semua" + "Export Ujian Ini")
-// UPDATE: Super Admin hanya melihat ujian miliknya sendiri (ujian admin biasa tidak masuk).
-
 import React, { useEffect, useState, useCallback, useMemo } from "react";
 import { Link } from "react-router-dom";
 import {
@@ -43,6 +39,22 @@ const formatTanggal = (isoString) => {
   }
 };
 
+// Helper untuk memformat tipe soal agar lebih enak dibaca di Excel
+const formatTipeSoal = (tipe) => {
+  switch (tipe) {
+    case "pilihanGanda":
+      return "Pilihan Ganda";
+    case "teksSingkat":
+      return "Isian Singkat";
+    case "esay":
+      return "Esai";
+    case "soalDokumen":
+      return "Upload Dokumen";
+    default:
+      return tipe || "-";
+  }
+};
+
 // ---------- Auth helpers (untuk scope superadmin) ----------
 const decodeJwt = (token) => {
   try {
@@ -66,7 +78,6 @@ const isSuperAdminRole = (role) => {
 };
 
 const getAdminContext = () => {
-  // prioritas: adminData dari login
   const stored = sessionStorage.getItem("adminData");
   if (stored) {
     try {
@@ -79,7 +90,6 @@ const getAdminContext = () => {
     } catch {}
   }
 
-  // fallback: decode token
   const token = sessionStorage.getItem("adminToken");
   if (!token) return { role: null, adminId: null };
   const payload = decodeJwt(token) || {};
@@ -104,6 +114,7 @@ const groupDataByUjianThenPeserta = (data) => {
   const groupedByExam = data.reduce((acc, row) => {
     const examId = row.exam_id ?? "unknown";
     const pesertaId = row.peserta_id;
+    const bobotSoal = row.bobot || 1; // Ambil bobot dari backend
 
     if (!acc[examId]) {
       acc[examId] = {
@@ -120,16 +131,47 @@ const groupDataByUjianThenPeserta = (data) => {
         email: row.email,
         pg_benar: 0,
         total_pg: 0,
+        
+        // Untuk perhitungan Nilai Akhir (%)
+        total_bobot_maksimal: 0,
+        total_bobot_diperoleh: 0,
+
+        // Untuk tampilan "Soal Benar" (Kuantitas)
+        total_soal_count: 0, 
+        total_benar_count: 0,
+        
+        // Untuk mencatat tipe soal apa saja yang ada
+        tipe_soal_set: new Set(),
+
         submitted_at: row.created_at,
       };
     }
 
+    // Catat tipe soal ke dalam Set (biar unik)
+    if (row.tipe_soal) {
+      acc[examId].peserta_map[pesertaId].tipe_soal_set.add(row.tipe_soal);
+    }
+
+    // Hitung statistik khusus PG (legacy/opsional)
     if (row.tipe_soal === "pilihanGanda" || row.tipe_soal === "teksSingkat") {
       acc[examId].peserta_map[pesertaId].total_pg += 1;
       if (row.benar) {
         acc[examId].peserta_map[pesertaId].pg_benar += 1;
       }
     }
+    
+    // 1. Hitung Bobot (Untuk Nilai Persentase)
+    acc[examId].peserta_map[pesertaId].total_bobot_maksimal += bobotSoal;
+    if (row.benar) {
+      acc[examId].peserta_map[pesertaId].total_bobot_diperoleh += bobotSoal;
+    }
+
+    // 2. Hitung Kuantitas Soal (Untuk Kolom "Soal Benar")
+    acc[examId].peserta_map[pesertaId].total_soal_count += 1;
+    if (row.benar) {
+      acc[examId].peserta_map[pesertaId].total_benar_count += 1;
+    }
+
     return acc;
   }, {});
 
@@ -137,11 +179,35 @@ const groupDataByUjianThenPeserta = (data) => {
     const examGroup = groupedByExam[examId];
     examGroup.list_peserta = Object.values(examGroup.peserta_map).map(
       (peserta) => {
-        const nilai =
+        // Hitung skor berdasarkan Bobot (Agar sinkron dengan HasilAkhir.jsx)
+        const nilaiAkhirBobot =
+          peserta.total_bobot_maksimal > 0
+            ? Number(
+                (
+                  (peserta.total_bobot_diperoleh /
+                    peserta.total_bobot_maksimal) *
+                  100
+                ).toFixed(1)
+              )
+            : 0;
+            
+        // Skor PG Lama (sekadar referensi jika dibutuhkan)
+        const skorPgLama =
           peserta.total_pg > 0
             ? Number(((peserta.pg_benar / peserta.total_pg) * 100).toFixed(0))
             : 0;
-        return { ...peserta, skor_pg: nilai };
+        
+        // Convert Set tipe soal menjadi string yang rapi
+        const listTipeSoal = Array.from(peserta.tipe_soal_set)
+          .map(t => formatTipeSoal(t))
+          .join(", ");
+
+        return {
+          ...peserta,
+          skor_pg: skorPgLama, 
+          nilai_akhir_bobot: nilaiAkhirBobot, // Nilai % tetap pakai bobot
+          tipe_soal_string: listTipeSoal, // String daftar tipe soal
+        };
       }
     );
     examGroup.list_peserta.sort(
@@ -155,14 +221,16 @@ const groupDataByUjianThenPeserta = (data) => {
 const sanitizeSheetName = (name) =>
   (name || "Sheet").toString().replace(/[\\/*?[\]]/g, "").substring(0, 31);
 
+// Export Excel: Menambahkan kolom Tipe Soal
 const prepareDataForExport = (pesertaList) =>
   pesertaList.map((p) => ({
     "Nama Peserta": p.nama,
     "Nomor HP": p.nohp,
     Email: p.email,
     "Waktu Submit": formatTanggal(p.submitted_at),
-    "Skor Benar": `${p.pg_benar} / ${p.total_pg}`,
-    "Nilai (PG)": `${p.skor_pg}%`,
+    "Tipe Soal": p.tipe_soal_string, // <-- Kolom Baru: Tipe Soal
+    "Soal Benar": `${p.total_benar_count} / ${p.total_soal_count}`,
+    "Nilai Akhir (Skala 100)": `${p.nilai_akhir_bobot}%`,
   }));
 
 const badgeColor = (v) => {
@@ -175,6 +243,22 @@ const barColor = (v) => {
   if (v >= 80) return "bg-green-500";
   if (v >= 60) return "bg-yellow-500";
   return "bg-red-500";
+};
+
+// ---------- helper export baru ----------
+const statusJawabanExport = (row) => {
+  if (row.tipe_soal === "esay" || row.tipe_soal === "soalDokumen")
+    return "Manual / Belum Dinilai";
+  return row.benar ? "Benar" : "Salah";
+};
+
+const jawabanExportText = (row) => {
+  if (row.tipe_soal === "soalDokumen") {
+    return row.jawaban_text
+      ? `${API_URL}${row.jawaban_text}`
+      : "(Tidak upload file)";
+  }
+  return row.jawaban_text || "(Tidak Dijawab)";
 };
 
 // ---------- Component ----------
@@ -198,7 +282,6 @@ const HasilUjian = () => {
       const { role, adminId } = getAdminContext();
       const isSuperAdmin = isSuperAdminRole(role);
 
-      // ✅ jika superadmin, batasi ke ujian miliknya sendiri via query param backend
       const url =
         isSuperAdmin && adminId
           ? `${API_URL}/api/hasil?target_admin_id=${encodeURIComponent(
@@ -234,7 +317,6 @@ const HasilUjian = () => {
     fetchData();
   }, [fetchData]);
 
-  // auto select first exam after load
   useEffect(() => {
     if (!selectedExamId && Object.keys(groupedHasil).length > 0) {
       const firstExamId = Object.keys(groupedHasil)[0];
@@ -242,14 +324,12 @@ const HasilUjian = () => {
     }
   }, [groupedHasil, selectedExamId]);
 
-  // Copy to clipboard
   const handleCopy = (text) => {
     navigator.clipboard.writeText(text).catch((err) => {
       console.error("Gagal menyalin teks: ", err);
     });
   };
 
-  // WA link
   const formatWhatsappURL = (nohp) => {
     if (!nohp) return "#";
     let formattedNohp = String(nohp).replace(/[\s-]/g, "");
@@ -271,23 +351,23 @@ const HasilUjian = () => {
       const wb = XLSX.utils.book_new();
 
       Object.entries(groupedHasil).forEach(([examId, groupData]) => {
-        // Ringkasan
         const summaryData = prepareDataForExport(groupData.list_peserta);
         const wsSummary = XLSX.utils.json_to_sheet(summaryData);
+        // Sesuaikan lebar kolom untuk "Tipe Soal"
         wsSummary["!cols"] = [
-          { wch: 30 },
-          { wch: 20 },
-          { wch: 30 },
-          { wch: 20 },
-          { wch: 15 },
-          { wch: 15 },
+          { wch: 30 }, // Nama
+          { wch: 20 }, // NoHP
+          { wch: 30 }, // Email
+          { wch: 20 }, // Waktu Submit
+          { wch: 35 }, // Tipe Soal (Kolom Baru)
+          { wch: 15 }, // Soal Benar
+          { wch: 18 }, // Nilai Akhir
         ];
         const summarySheetName = sanitizeSheetName(
           `R - ${groupData.keterangan?.substring(0, 20) || "Ujian"} (ID ${examId})`
         );
         XLSX.utils.book_append_sheet(wb, wsSummary, summarySheetName);
 
-        // Detail
         const numericExamId = parseInt(examId, 10);
         const detailData = rawData.filter(
           (row) => row.exam_id === numericExamId
@@ -299,9 +379,10 @@ const HasilUjian = () => {
             Email: row.email,
             "Waktu Submit": formatTanggal(row.created_at),
             "Teks Soal": row.soal_text,
-            "Tipe Soal": row.tipe_soal,
-            "Jawaban Peserta": row.jawaban_text || "(Tidak Dijawab)",
-            "Status Jawaban": row.benar ? "Benar" : "Salah",
+            "Tipe Soal": formatTipeSoal(row.tipe_soal), // Format agar lebih rapi
+            "Bobot Soal": row.bobot || 1, // Menampilkan bobot per soal di detail
+            "Jawaban Peserta": jawabanExportText(row),
+            "Status Jawaban": statusJawabanExport(row),
             "Kunci Jawaban": row.kunci_jawaban_text || "-",
           }));
           const wsDetail = XLSX.utils.json_to_sheet(detailToExport);
@@ -312,8 +393,9 @@ const HasilUjian = () => {
             { wch: 20 },
             { wch: 50 },
             { wch: 15 },
-            { wch: 30 },
-            { wch: 10 },
+            { wch: 10 }, // Bobot
+            { wch: 40 },
+            { wch: 18 },
             { wch: 30 },
           ];
           const detailSheetName = sanitizeSheetName(
@@ -337,20 +419,21 @@ const HasilUjian = () => {
       const wb = XLSX.utils.book_new();
       const safeFileName = sanitizeSheetName(groupData.keterangan || "Ujian");
 
-      // Ringkasan
+      // --- Sheet 1: Ringkasan ---
       const summaryData = prepareDataForExport(groupData.list_peserta);
       const wsSummary = XLSX.utils.json_to_sheet(summaryData);
       wsSummary["!cols"] = [
-        { wch: 30 },
-        { wch: 20 },
-        { wch: 30 },
-        { wch: 20 },
-        { wch: 15 },
-        { wch: 15 },
+        { wch: 30 }, // Nama
+        { wch: 20 }, // NoHP
+        { wch: 30 }, // Email
+        { wch: 20 }, // Waktu Submit
+        { wch: 35 }, // Tipe Soal (Kolom Baru)
+        { wch: 15 }, // Soal Benar
+        { wch: 18 }, // Nilai Akhir
       ];
       XLSX.utils.book_append_sheet(wb, wsSummary, "Ringkasan");
 
-      // Detail
+      // --- Sheet 2: Detail Jawaban ---
       const numericExamId = parseInt(examId, 10);
       const detailData = rawData.filter(
         (row) => row.exam_id === numericExamId
@@ -367,9 +450,10 @@ const HasilUjian = () => {
         Email: row.email,
         "Waktu Submit": formatTanggal(row.created_at),
         "Teks Soal": row.soal_text,
-        "Tipe Soal": row.tipe_soal,
-        "Jawaban Peserta": row.jawaban_text || "(Tidak Dijawab)",
-        "Status Jawaban": row.benar ? "Benar" : "Salah",
+        "Tipe Soal": formatTipeSoal(row.tipe_soal),
+        "Bobot Soal": row.bobot || 1, // Menampilkan bobot
+        "Jawaban Peserta": jawabanExportText(row),
+        "Status Jawaban": statusJawabanExport(row),
         "Kunci Jawaban": row.kunci_jawaban_text || "-",
       }));
       const wsDetail = XLSX.utils.json_to_sheet(detailToExport);
@@ -378,11 +462,12 @@ const HasilUjian = () => {
         { wch: 20 },
         { wch: 30 },
         { wch: 20 },
-        { wch: 50 },
-        { wch: 15 },
-        { wch: 30 },
-        { wch: 10 },
-        { wch: 30 },
+        { wch: 50 }, // Soal
+        { wch: 15 }, // Tipe
+        { wch: 10 }, // Bobot
+        { wch: 40 }, // Jawaban
+        { wch: 18 }, // Status
+        { wch: 30 }, // Kunci
       ];
       XLSX.utils.book_append_sheet(wb, wsDetail, "Detail Jawaban");
 
@@ -396,6 +481,7 @@ const HasilUjian = () => {
   // ---------- Derived ----------
   const selectedGroup = selectedExamId ? groupedHasil[selectedExamId] : null;
 
+  // STATS: Menggunakan nilai_akhir_bobot
   const stats = useMemo(() => {
     if (!selectedGroup) return { count: 0, avg: 0, lastSubmit: "-" };
     const list = selectedGroup.list_peserta || [];
@@ -403,7 +489,7 @@ const HasilUjian = () => {
     const avg =
       count > 0
         ? Math.round(
-            list.reduce((a, b) => a + Number(b.skor_pg || 0), 0) / count
+            list.reduce((a, b) => a + Number(b.nilai_akhir_bobot || 0), 0) / count
           )
         : 0;
     const last = list[0]?.submitted_at
@@ -412,6 +498,7 @@ const HasilUjian = () => {
     return { count, avg, lastSubmit: last };
   }, [selectedGroup]);
 
+  // FILTERED SORTED
   const filteredSorted = useMemo(() => {
     if (!selectedGroup) return [];
     const q = search.trim().toLowerCase();
@@ -433,9 +520,11 @@ const HasilUjian = () => {
         case "nama":
           return a.nama?.localeCompare(b.nama || "") * dir;
         case "skor_pg":
-          return (Number(a.skor_pg) - Number(b.skor_pg)) * dir;
+          // Sort berdasarkan nilai akhir (persen)
+          return (Number(a.nilai_akhir_bobot) - Number(b.nilai_akhir_bobot)) * dir;
         case "pg_benar":
-          return (Number(a.pg_benar) - Number(b.pg_benar)) * dir;
+          // UPDATE: Sort berdasarkan jumlah soal benar (kuantitas)
+          return (Number(a.total_benar_count) - Number(b.total_benar_count)) * dir;
         case "submitted_at":
         default:
           return (new Date(a.submitted_at) - new Date(b.submitted_at)) * dir;
@@ -495,39 +584,44 @@ const HasilUjian = () => {
   return (
     <div className="bg-gray-50 min-h-screen flex flex-col">
       {/* HEADER */}
-      <div className="bg-white shadow-sm border-b border-gray-200 px-6 md:px-8 py-4 flex flex-col md:flex-row md:items-center md:justify-between gap-3 sticky top-0 z-50">
+      <div className="bg-white shadow-sm border-b border-gray-300 py-4 pl-14 pr-4 md:px-8 md:py-5 flex flex-col md:flex-row md:items-center md:justify-between gap-3 sticky top-0 z-50 transition-all">
         <div className="flex items-center gap-3">
-          <div className="p-2 rounded-lg bg-blue-50 text-blue-600">
+          {/* ICON: HANYA TAMPIL DI DESKTOP */}
+          <div className="hidden md:flex p-2 rounded-lg bg-blue-50 text-blue-600">
             <FaPoll />
           </div>
           <div>
-            <h2 className="text-lg md:text-xl font-semibold text-gray-900">
+            <h2 className="text-xl md:text-2xl font-semibold text-gray-900">
               Rekap Hasil Ujian
             </h2>
-            <p className="text-sm text-gray-500">
+            {/* DESKRIPSI: HANYA TAMPIL DI DESKTOP */}
+            <p className="hidden md:block text-sm text-gray-500">
               Lihat ringkasan nilai peserta dan ekspor data ke Excel.
             </p>
           </div>
         </div>
 
-        <div className="flex items-center gap-2">
+        {/* TOMBOL NAVBAR: HANYA TAMPIL DI TABLET/DESKTOP (sm ke atas) */}
+        <div className="hidden sm:flex items-center gap-2 self-end md:self-auto">
           <button
             onClick={handleExportAll}
-            className="flex items-center gap-2 px-3 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition"
+            className="flex items-center gap-2 px-3 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition text-sm"
           >
-            <FaFileExcel /> Export Semua
+            <FaFileExcel />
+            <span>Export Semua</span>
           </button>
           <button
             onClick={fetchData}
-            className="flex items-center gap-2 px-3 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition"
+            className="flex items-center gap-2 px-3 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition text-sm"
           >
-            <FaSyncAlt /> Refresh
+            <FaSyncAlt />
+            <span>Refresh</span>
           </button>
         </div>
       </div>
 
       {/* FILTER BAR */}
-      <div className="p-6 pt-4">
+      <div className="p-4 md:p-6 md:pt-4">
         <div className="bg-white border border-gray-200 rounded-xl p-4 md:p-5 shadow-sm">
           <div className="flex flex-col lg:flex-row lg:items-end gap-4">
             {/* Dropdown Ujian */}
@@ -538,7 +632,7 @@ const HasilUjian = () => {
               <select
                 value={selectedExamId || ""}
                 onChange={(e) => setSelectedExamId(e.target.value)}
-                className="w-full border border-gray-300 rounded-md p-2.5 text-gray-800 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full border border-gray-300 rounded-md p-2.5 text-gray-800 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
               >
                 {Object.entries(groupedHasil).map(([examId, groupData]) => (
                   <option key={examId} value={examId}>
@@ -559,24 +653,36 @@ const HasilUjian = () => {
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
                   placeholder="Cari nama, email, atau nomor HP..."
-                  className="w-full pl-10 pr-3 py-2.5 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full pl-10 pr-3 py-2.5 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
                 />
               </div>
             </div>
 
-            {/* Export current exam */}
-            {selectedGroup && (
-              <div className="flex items-end">
+            {/* ACTION BUTTONS CONTAINER */}
+            <div className="flex gap-2 w-full lg:w-auto mt-2 lg:mt-0">
+              
+              {/* TOMBOL EXPORT SEMUA (KHUSUS MOBILE) */}
+              {/* Ini muncul di sebelah kiri Export Ujian Ini pada tampilan mobile */}
+              <button
+                onClick={handleExportAll}
+                className="sm:hidden flex-1 h-[42px] flex items-center justify-center gap-2 px-3 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition text-sm"
+              >
+                <FaFileExcel /> Semua
+              </button>
+
+              {/* TOMBOL EXPORT UJIAN INI */}
+              {selectedGroup && (
                 <button
                   onClick={() =>
                     handleExportCombined(selectedExamId, selectedGroup)
                   }
-                  className="h-[42px] flex items-center gap-2 px-3 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition"
+                  className="flex-1 lg:flex-none h-[42px] flex items-center justify-center gap-2 px-3 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition text-sm whitespace-nowrap"
                 >
-                  <FaFileExcel /> Export Ujian Ini
+                  <FaFileExcel /> <span className="sm:hidden">Ujian Ini</span>
+                  <span className="hidden sm:inline">Export Ujian Ini</span>
                 </button>
-              </div>
-            )}
+              )}
+            </div>
           </div>
 
           {/* Stats */}
@@ -590,7 +696,7 @@ const HasilUjian = () => {
               </div>
               <div className="p-3 rounded-lg border bg-gray-50">
                 <div className="text-xs text-gray-500">
-                  Rata-rata Nilai (PG)
+                  Rata-rata Nilai (Skala 100)
                 </div>
                 <div className="flex items-center gap-2">
                   <span
@@ -621,18 +727,18 @@ const HasilUjian = () => {
 
       {/* TABLE CARD */}
       {selectedGroup ? (
-        <div className="px-6 pb-8">
+        <div className="px-4 md:px-6 pb-8">
           <div className="bg-white rounded-xl shadow-sm border border-gray-200">
             {/* Table controls */}
             <div className="px-4 md:px-5 py-3 flex flex-col md:flex-row md:items-center md:justify-between gap-3 border-b">
               <div className="text-sm text-gray-600 flex items-center gap-2">
                 <FaInfoCircle className="text-gray-400" />
-                Menampilkan{" "}
-                <span className="font-semibold">{pageData.length}</span> dari{" "}
-                <span className="font-semibold">
-                  {filteredSorted.length}
-                </span>{" "}
-                peserta
+                <span>
+                  Menampilkan{" "}
+                  <span className="font-semibold">{pageData.length}</span> dari{" "}
+                  <span className="font-semibold">{filteredSorted.length}</span>{" "}
+                  peserta
+                </span>
               </div>
               <div className="flex items-center gap-2 text-sm">
                 <span className="text-gray-600">Baris:</span>
@@ -656,14 +762,18 @@ const HasilUjian = () => {
                   <tr>
                     <th
                       onClick={() => toggleSort("nama")}
-                      className="py-3 px-5 border-b cursor-pointer select-none"
+                      className="py-3 px-5 border-b cursor-pointer select-none whitespace-nowrap"
                     >
                       <div className="inline-flex items-center gap-2">
                         Nama Peserta <SortIcon col="nama" />
                       </div>
                     </th>
-                    <th className="py-3 px-5 border-b">Nomor HP</th>
-                    <th className="py-3 px-5 border-b">Email</th>
+                    <th className="py-3 px-5 border-b whitespace-nowrap">
+                      Nomor HP
+                    </th>
+                    <th className="py-3 px-5 border-b whitespace-nowrap">
+                      Email
+                    </th>
                     <th
                       onClick={() => toggleSort("submitted_at")}
                       className="py-3 px-5 border-b cursor-pointer select-none whitespace-nowrap"
@@ -677,18 +787,20 @@ const HasilUjian = () => {
                       className="py-3 px-5 border-b cursor-pointer select-none whitespace-nowrap"
                     >
                       <div className="inline-flex items-center gap-2">
-                        Skor Benar <SortIcon col="pg_benar" />
+                        Soal Benar <SortIcon col="pg_benar" />
                       </div>
                     </th>
                     <th
                       onClick={() => toggleSort("skor_pg")}
-                      className="py-3 px-5 border-b cursor-pointer select-none"
+                      className="py-3 px-5 border-b cursor-pointer select-none whitespace-nowrap"
                     >
                       <div className="inline-flex items-center gap-2">
-                        Nilai <SortIcon col="skor_pg" />
+                        Nilai Akhir <SortIcon col="skor_pg" />
                       </div>
                     </th>
-                    <th className="py-3 px-5 text-center border-b">Aksi</th>
+                    <th className="py-3 px-5 text-center border-b whitespace-nowrap">
+                      Aksi
+                    </th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100">
@@ -717,7 +829,7 @@ const HasilUjian = () => {
                       </td>
                       <td className="py-3 px-5">
                         <div className="flex items-center justify-between gap-3">
-                          <span className="truncate max-w-[260px] text-gray-700">
+                          <span className="truncate max-w-[200px] text-gray-700">
                             {peserta.email || "-"}
                           </span>
                           {peserta.email && (
@@ -735,28 +847,29 @@ const HasilUjian = () => {
                         {formatTanggal(peserta.submitted_at)}
                       </td>
                       <td className="py-3 px-5 whitespace-nowrap font-semibold text-gray-800">
-                        {peserta.pg_benar} / {peserta.total_pg}
+                        {peserta.total_benar_count} / {peserta.total_soal_count}
                       </td>
+
                       <td className="py-3 px-5 whitespace-nowrap">
                         <div className="flex items-center gap-2">
                           <span
                             className={`inline-flex items-center px-2 py-1 border rounded-md text-xs font-bold ${badgeColor(
-                              Number(peserta.skor_pg || 0)
+                              Number(peserta.nilai_akhir_bobot || 0)
                             )}`}
                           >
-                            {Number(peserta.skor_pg || 0)}%
+                            {Number(peserta.nilai_akhir_bobot || 0)}%
                           </span>
-                          <div className="w-28 h-2 bg-gray-200 rounded">
+                          <div className="w-20 md:w-28 h-2 bg-gray-200 rounded hidden sm:block">
                             <div
                               className={`h-2 rounded ${barColor(
-                                Number(peserta.skor_pg || 0)
+                                Number(peserta.nilai_akhir_bobot || 0)
                               )}`}
                               style={{
                                 width: `${Math.min(
                                   100,
                                   Math.max(
                                     0,
-                                    Number(peserta.skor_pg || 0)
+                                    Number(peserta.nilai_akhir_bobot || 0)
                                   )
                                 )}%`,
                               }}
@@ -764,6 +877,7 @@ const HasilUjian = () => {
                           </div>
                         </div>
                       </td>
+
                       <td className="py-3 px-5 text-center">
                         <Link
                           to={`/admin/hasil/${peserta.peserta_id}`}
@@ -791,8 +905,8 @@ const HasilUjian = () => {
             </div>
 
             {/* Pagination */}
-            <div className="px-4 md:px-5 py-3 border-t flex items-center justify-between">
-              <div className="text-sm text-gray-600">
+            <div className="px-4 md:px-5 py-3 border-t flex flex-col sm:flex-row items-center justify-between gap-3">
+              <div className="text-sm text-gray-600 text-center sm:text-left">
                 Halaman{" "}
                 <span className="font-semibold">{currentPage}</span> dari{" "}
                 <span className="font-semibold">{totalPages}</span>
@@ -801,16 +915,16 @@ const HasilUjian = () => {
                 <button
                   onClick={() => setPage((p) => Math.max(1, p - 1))}
                   disabled={currentPage === 1}
-                  className="inline-flex items-center gap-2 px-3 py-2 border rounded-md text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="inline-flex items-center gap-2 px-3 py-2 border rounded-md text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed text-sm"
                 >
-                  <FaChevronLeft /> Prev
+                  <FaChevronLeft /> Sebelumnya
                 </button>
                 <button
                   onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
                   disabled={currentPage === totalPages}
-                  className="inline-flex items-center gap-2 px-3 py-2 border rounded-md text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="inline-flex items-center gap-2 px-3 py-2 border rounded-md text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed text-sm"
                 >
-                  Next <FaChevronRight />
+                  Selanjutnya <FaChevronRight />
                 </button>
               </div>
             </div>

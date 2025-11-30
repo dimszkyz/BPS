@@ -11,6 +11,7 @@ import {
   FaKey,
   FaCog,
   FaCheckCircle,
+  FaExclamationCircle,
 } from "react-icons/fa";
 import DaftarUndangan from "./DaftarUndangan";
 import EmailPengirim from "./EmailPengirim";
@@ -36,8 +37,9 @@ const TambahPeserta = () => {
   // --- STATE UNTUK MODAL PENGATURAN EMAIL ---
   const [showEmailSettings, setShowEmailSettings] = useState(false);
 
-  // --- STATE UNTUK TOAST ---
+  // --- STATE UNTUK NOTIFIKASI (TOAST) ---
   const [successMessage, setSuccessMessage] = useState("");
+  const [errorMessage, setErrorMessage] = useState("");
 
   // --- Fetch Daftar Ujian saat komponen dimuat ---
   useEffect(() => {
@@ -54,7 +56,7 @@ const TambahPeserta = () => {
         setUjianList(data.filter((u) => !u.is_deleted));
       } catch (err) {
         console.error(err);
-        alert(err.message);
+        console.warn("Gagal load ujian:", err.message);
       } finally {
         setLoadingUjian(false);
       }
@@ -62,26 +64,72 @@ const TambahPeserta = () => {
     fetchUjianList();
   }, []);
 
-  // --- Handler Tambah Email ke List ---
+  // --- Handler Tambah Email Satu per Satu ---
   const handleAddEmail = () => {
+    setErrorMessage("");
     const emailToAdd = currentEmail.trim();
 
     if (!emailToAdd) {
-      alert("Masukkan alamat email terlebih dahulu.");
+      setErrorMessage("Masukkan alamat email terlebih dahulu.");
+      setTimeout(() => setErrorMessage(""), 3000);
       return;
     }
     if (!isValidEmail(emailToAdd)) {
-      alert(`Format email "${emailToAdd}" tidak valid.`);
+      setErrorMessage(`Format email "${emailToAdd}" tidak valid.`);
+      setTimeout(() => setErrorMessage(""), 3000);
       return;
     }
     if (emails.includes(emailToAdd)) {
-      alert(`Email "${emailToAdd}" sudah ada dalam daftar.`);
+      setErrorMessage(`Email "${emailToAdd}" sudah ada dalam daftar.`);
       setCurrentEmail("");
+      setTimeout(() => setErrorMessage(""), 3000);
       return;
     }
 
     setEmails([...emails, emailToAdd]);
     setCurrentEmail("");
+  };
+
+  // --- FITUR BARU: Handler Paste Banyak Email (Batch) ---
+  const handlePaste = (e) => {
+    e.preventDefault();
+
+    const pasteData = e.clipboardData.getData("text");
+    if (!pasteData) return;
+
+    const rawEmails = pasteData.split(/[\s,;]+/);
+
+    const validNewEmails = [];
+    let duplicateCount = 0;
+    let invalidCount = 0;
+
+    rawEmails.forEach((emailStr) => {
+      const cleanEmail = emailStr.trim();
+      if (!cleanEmail) return;
+
+      if (isValidEmail(cleanEmail)) {
+        if (!emails.includes(cleanEmail) && !validNewEmails.includes(cleanEmail)) {
+          validNewEmails.push(cleanEmail);
+        } else {
+          duplicateCount++;
+        }
+      } else {
+        invalidCount++;
+      }
+    });
+
+    if (validNewEmails.length > 0) {
+      setEmails((prev) => [...prev, ...validNewEmails]);
+      setSuccessMessage(`Berhasil menambahkan ${validNewEmails.length} email.`);
+      setTimeout(() => setSuccessMessage(""), 5000);
+    } else {
+      setErrorMessage("Tidak ada email valid baru yang ditemukan.");
+      setTimeout(() => setErrorMessage(""), 5000);
+    }
+
+    if (invalidCount > 0 || duplicateCount > 0) {
+      console.log(`Info Paste: ${invalidCount} invalid, ${duplicateCount} duplikat.`);
+    }
   };
 
   // --- Handler Hapus Email dari List ---
@@ -92,15 +140,17 @@ const TambahPeserta = () => {
   // --- Handler Kirim Undangan ---
   const handleSubmit = async (e) => {
     e.preventDefault();
+    setErrorMessage("");
+    setSuccessMessage("");
 
     if (!selectedExamId) {
-      alert("Pilih ujian yang akan diundang terlebih dahulu.");
+      setErrorMessage("Pilih ujian yang akan diundang terlebih dahulu.");
       return;
     }
 
     const maxLoginsNum = parseInt(maxLogins, 10);
     if (isNaN(maxLoginsNum) || maxLoginsNum <= 0) {
-      alert("Batas login minimal harus 1.");
+      setErrorMessage("Batas login minimal harus 1.");
       return;
     }
 
@@ -109,7 +159,7 @@ const TambahPeserta = () => {
 
     if (finalCurrentEmail) {
       if (!isValidEmail(finalCurrentEmail)) {
-        alert(`Format email "${finalCurrentEmail}" di input tidak valid.`);
+        setErrorMessage(`Format email "${finalCurrentEmail}" di input tidak valid.`);
         return;
       }
       if (!finalEmails.includes(finalCurrentEmail)) {
@@ -119,11 +169,11 @@ const TambahPeserta = () => {
     }
 
     if (!pesan.trim()) {
-      alert("Isi Email Undangan tidak boleh kosong.");
+      setErrorMessage("Isi Email Undangan tidak boleh kosong.");
       return;
     }
     if (finalEmails.length === 0) {
-      alert("Tambahkan setidaknya satu alamat email peserta.");
+      setErrorMessage("Tambahkan setidaknya satu alamat email peserta.");
       return;
     }
 
@@ -158,12 +208,12 @@ const TambahPeserta = () => {
       }
 
       if (!response.ok && response.status !== 207) {
-        const errorMessage =
+        const msg =
           result.message ||
           (result.errors && result.errors.length > 0
             ? `Gagal: ${result.errors[0].reason}`
             : `Server error: ${response.status}`);
-        throw new Error(errorMessage);
+        throw new Error(msg);
       }
 
       setSuccessMessage(result.message || `Proses pengiriman selesai.`);
@@ -174,7 +224,8 @@ const TambahPeserta = () => {
       setRefreshKey((prevKey) => prevKey + 1);
     } catch (error) {
       console.error("Error mengirim undangan:", error);
-      alert(`Gagal mengirim undangan: ${error.message}`);
+      setErrorMessage(error.message);
+      setTimeout(() => setErrorMessage(""), 7000);
     } finally {
       setLoading(false);
     }
@@ -182,51 +233,76 @@ const TambahPeserta = () => {
 
   return (
     <div className="bg-gray-50 min-h-screen flex flex-col relative pb-10">
-      {/* --- TOAST SUKSES --- */}
-      {successMessage && (
-        <div className="fixed top-24 left-1/2 -translate-x-1/2 z-[100]">
-          <div className="flex items-center gap-3 bg-green-600 text-white px-5 py-3 rounded-lg shadow-lg animate-bounce-in">
-            <FaCheckCircle className="text-white w-5 h-5" />
-            <span className="font-semibold text-base">{successMessage}</span>
+      {/* =========================================
+          AREA NOTIFIKASI / TOAST
+      ========================================== */}
+      <div className="fixed top-24 left-1/2 -translate-x-1/2 z-[100] w-full max-w-xl px-4 flex flex-col gap-2">
+        {successMessage && (
+          <div className="flex justify-between items-start bg-green-100 border border-green-200 text-green-800 px-5 py-3 rounded-lg shadow-lg animate-bounce-in">
+            <div className="flex items-center gap-3">
+              <FaCheckCircle className="text-green-600 w-5 h-5 flex-shrink-0" />
+              <span className="font-semibold text-sm md:text-base leading-snug">
+                {successMessage}
+              </span>
+            </div>
+            <button
+              onClick={() => setSuccessMessage("")}
+              className="text-green-600 hover:text-green-800 ml-3"
+            >
+              <FaTimes />
+            </button>
           </div>
-        </div>
-      )}
+        )}
 
-      {/* Header */}
-      <div className="bg-white shadow-sm border-b border-gray-200 px-6 py-4 sticky top-0 z-40 flex justify-between items-center">
-        <h2 className="text-xl md:text-2xl font-bold text-gray-800 flex items-center gap-2">
-          <div className="p-2 bg-blue-100 rounded-lg">
-            <FaPaperPlane className="text-blue-600 w-5 h-5" />
+        {errorMessage && (
+          <div className="flex justify-between items-start bg-red-100 border border-red-200 text-red-800 px-5 py-3 rounded-lg shadow-lg animate-bounce-in">
+            <div className="flex items-center gap-3">
+              <FaExclamationCircle className="text-red-600 w-5 h-5 flex-shrink-0" />
+              <span className="font-semibold text-sm md:text-base leading-snug">
+                {errorMessage}
+              </span>
+            </div>
+            <button
+              onClick={() => setErrorMessage("")}
+              className="text-red-600 hover:text-red-800 ml-3"
+            >
+              <FaTimes />
+            </button>
           </div>
-          Undang Peserta Ujian
+        )}
+      </div>
+
+      <div className="bg-white shadow-sm border-b border-gray-300 py-4 pl-14 pr-4 md:px-8 md:py-5 sticky top-0 z-50 flex justify-between items-center transition-all">
+        <h2 className="text-xl md:text-2xl font-semibold text-gray-900 flex items-center gap-2">
+          <span className="hidden md:inline-flex">
+            <FaPaperPlane className="text-blue-600 w-5 h-5 md:w-6 md:h-6" />
+          </span>
+          <span>Undang Peserta Ujian</span>
         </h2>
 
-        {/* Tombol Pengaturan Email */}
         <button
           onClick={() => setShowEmailSettings(true)}
-          className="flex items-center gap-2 px-4 py-2 bg-white text-gray-600 rounded-lg hover:bg-gray-50 hover:text-blue-600 transition text-sm font-medium border border-gray-300 shadow-sm"
+          className="flex items-center gap-2 px-3 py-1.5 md:px-3 md:py-2 bg-white text-gray-600 rounded-md hover:bg-gray-50 hover:text-blue-600 transition text-xs md:text-sm font-medium border border-gray-300 shadow-sm"
           title="Konfigurasi Email Pengirim"
         >
           <FaCog /> <span className="hidden sm:inline">Pengaturan Email</span>
         </button>
       </div>
 
-      {/* Konten Utama - Layout Stacked (Atas Bawah) */}
-      <div className="p-6 max-w-6xl mx-auto w-full space-y-8">
-        
-        {/* BAGIAN 1: FORM PENGIRIMAN (Atas) */}
+      {/* Konten Utama */}
+      <div className="p-4 sm:p-6 max-w-6xl mx-auto w-full space-y-8">
+        {/* BAGIAN 1: FORM PENGIRIMAN */}
         <section className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
-          <div className="bg-gray-50 px-6 py-4 border-b border-gray-200">
+          <div className="bg-gray-50 px-4 sm:px-6 py-3 sm:py-4 border-b border-gray-200">
             <h3 className="font-semibold text-gray-700 flex items-center gap-2">
               <FaEnvelope className="text-gray-500" /> Form Undangan
             </h3>
           </div>
-          
-          <div className="p-6 md:p-8">
+
+          <div className="p-4 sm:p-6 md:p-8">
             <form onSubmit={handleSubmit} className="space-y-6">
               {/* Grid untuk Pilihan Ujian & Batas Login */}
               <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                {/* Pilih Ujian */}
                 <div className="md:col-span-2">
                   <label
                     htmlFor="ujian"
@@ -258,7 +334,6 @@ const TambahPeserta = () => {
                   </div>
                 </div>
 
-                {/* Batas Login */}
                 <div>
                   <label
                     htmlFor="max_logins"
@@ -300,13 +375,16 @@ const TambahPeserta = () => {
                   />
                 </div>
 
-                {/* Kanan: Input Email Dinamis */}
+                {/* Kanan: Input Email Dinamis (DENGAN FITUR PASTE) */}
                 <div className="flex flex-col">
                   <label
                     htmlFor="currentEmail"
                     className="block text-sm font-medium text-gray-700 mb-1.5"
                   >
                     Daftar Email Peserta
+                    <span className="text-xs font-normal text-gray-500 ml-2">
+                      (Bisa paste banyak email sekaligus)
+                    </span>
                   </label>
 
                   {/* Input + Tombol Tambah */}
@@ -316,12 +394,13 @@ const TambahPeserta = () => {
                         <FaEnvelope />
                       </span>
                       <input
-                        type="email"
+                        type="text"
                         id="currentEmail"
                         value={currentEmail}
                         onChange={(e) => setCurrentEmail(e.target.value)}
-                        className="w-full pl-9 pr-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition"
-                        placeholder="user@example.com"
+                        onPaste={handlePaste}
+                        className="w-full pl-9 pr-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition placeholder-gray-400/70"
+                        placeholder="masukan email peserta"
                         onKeyDown={(e) => {
                           if (e.key === "Enter") {
                             e.preventDefault();
@@ -340,22 +419,28 @@ const TambahPeserta = () => {
                   </div>
 
                   {/* List Email Container */}
-                  <div 
+                  <div
                     className="flex-1 border border-gray-200 rounded-lg bg-gray-50 p-2 overflow-y-auto"
                     style={{ maxHeight: "135px", minHeight: "135px" }}
                   >
                     {emails.length === 0 ? (
-                      <p className="text-gray-400 text-sm text-center mt-10">
-                        Belum ada email ditambahkan
-                      </p>
+                      <div className="h-full flex flex-col items-center justify-center text-gray-400 text-sm">
+                        <p>Belum ada email ditambahkan.</p>
+                        <p className="text-xs mt-1">
+                          Paste daftar email di kolom input atas.
+                        </p>
+                      </div>
                     ) : (
                       <ul className="space-y-1">
                         {emails.map((email, index) => (
                           <li
                             key={index}
-                            className="flex justify-between items-center text-sm bg-white px-3 py-1.5 rounded border border-gray-200 shadow-sm"
+                            className="flex justify-between items-center text-sm bg-white px-3 py-1.5 rounded border border-gray-200 shadow-sm animate-fade-in-up"
                           >
-                            <span className="text-gray-700 truncate mr-2" title={email}>
+                            <span
+                              className="text-gray-700 truncate mr-2"
+                              title={email}
+                            >
                               {email}
                             </span>
                             <button
@@ -409,9 +494,8 @@ const TambahPeserta = () => {
           </div>
         </section>
 
-        {/* BAGIAN 2: RIWAYAT UNDANGAN (Bawah - Full Width) */}
+        {/* BAGIAN 2: RIWAYAT UNDANGAN */}
         <section className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
-          {/* Memanggil DaftarUndangan dengan lebar penuh */}
           <DaftarUndangan refreshTrigger={refreshKey} />
         </section>
       </div>

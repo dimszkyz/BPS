@@ -14,215 +14,27 @@ import {
   FaDownload,
   FaUpload,
 } from "react-icons/fa";
-import * as XLSX from "xlsx";
+
+// Import logika Excel dari file baru
+import {
+  downloadWorkbook,
+  buildTemplateWorkbook,
+  generateWorkbookFromState,
+  parseWorkbookToState,
+} from "./TemplateExcel";
+
+const FILE_TYPE_GROUPS = [
+  { label: "PDF (.pdf)", exts: [".pdf"] },
+  { label: "Word (.doc, .docx)", exts: [".doc", ".docx"] },
+  { label: "Excel (.xls, .xlsx)", exts: [".xls", ".xlsx"] },
+  { label: "Gambar (JPG/PNG)", exts: [".jpg", ".jpeg", ".png"] },
+  { label: "ZIP/RAR", exts: [".zip", ".rar"] },
+];
 
 const getAdminToken = () => {
   const token = sessionStorage.getItem("adminToken");
   if (!token) throw new Error("Token tidak ditemukan.");
   return token;
-};
-
-// ---------- Excel Helpers ----------
-const downloadWorkbook = (wb, filename = "template_soal.xlsx") => {
-  const wbout = XLSX.write(wb, { bookType: "xlsx", type: "array" });
-  const blob = new Blob([wbout], { type: "application/octet-stream" });
-  const url = window.URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename;
-  a.click();
-  window.URL.revokeObjectURL(url);
-};
-
-const buildTemplateWorkbook = () => {
-  // Sheet TEMPLATE_SOAL
-  const soalHeaders = [
-    "tipeSoal",
-    "soalText",
-    "pilihan1",
-    "pilihan2",
-    "pilihan3",
-    "pilihan4",
-    "pilihan5",
-    "kunciJawaban",
-    "gambarUrl",
-  ];
-
-  const contohSoal = [
-    {
-      tipeSoal: "pilihanGanda",
-      soalText: "Contoh soal PG: Ibu membeli 2 apel ... berapa totalnya?",
-      pilihan1: "10.000",
-      pilihan2: "15.000",
-      pilihan3: "20.000",
-      pilihan4: "",
-      pilihan5: "",
-      kunciJawaban: "3",
-      gambarUrl: "",
-    },
-    {
-      tipeSoal: "teksSingkat",
-      soalText: "Contoh teks singkat: 2 + 2 = ?",
-      pilihan1: "",
-      pilihan2: "",
-      pilihan3: "",
-      pilihan4: "",
-      pilihan5: "",
-      kunciJawaban: "4, empat",
-      gambarUrl: "",
-    },
-    {
-      tipeSoal: "esay",
-      soalText: "Contoh esai: Jelaskan pendapatmu tentang ...",
-      pilihan1: "",
-      pilihan2: "",
-      pilihan3: "",
-      pilihan4: "",
-      pilihan5: "",
-      kunciJawaban: "",
-      gambarUrl: "",
-    },
-  ];
-
-  const wsSoal = XLSX.utils.json_to_sheet(contohSoal, { header: soalHeaders });
-  XLSX.utils.sheet_add_aoa(wsSoal, [soalHeaders], { origin: "A1" });
-
-  // Sheet PENGATURAN_UJIAN (1 baris)
-  const settingHeaders = [
-    "keterangan",
-    "tanggalMulai",
-    "tanggalBerakhir",
-    "jamMulai",
-    "jamBerakhir",
-    "durasiMenit",
-    "acakSoal",
-    "acakOpsi",
-  ];
-
-  const contohSetting = [
-    {
-      keterangan: "Ujian Matematika Dasar",
-      tanggalMulai: "2025-01-01",
-      tanggalBerakhir: "2025-01-02",
-      jamMulai: "08:00",
-      jamBerakhir: "17:00",
-      durasiMenit: "90",
-      acakSoal: "TRUE",
-      acakOpsi: "TRUE",
-    },
-  ];
-
-  const wsSetting = XLSX.utils.json_to_sheet(contohSetting, {
-    header: settingHeaders,
-  });
-  XLSX.utils.sheet_add_aoa(wsSetting, [settingHeaders], { origin: "A1" });
-
-  // Sheet PETUNJUK
-  const petunjuk = [
-    ["PETUNJUK PENGISIAN TEMPLATE"],
-    [""],
-    ["A. PENGATURAN_UJIAN (isi hanya 1 baris)"],
-    ["1) keterangan: judul/keterangan ujian."],
-    ["2) tanggalMulai & tanggalBerakhir format: YYYY-MM-DD (contoh 2025-01-01)."],
-    ["3) jamMulai & jamBerakhir format: HH:MM (contoh 08:00)."],
-    ["4) durasiMenit wajib angka > 0 (menit)."],
-    ["5) acakSoal & acakOpsi isi TRUE/FALSE atau 1/0."],
-    [""],
-    ["B. TEMPLATE_SOAL (1 soal per baris)"],
-    ["1) tipeSoal: pilihanGanda / teksSingkat / esay (boleh juga: esai/essay -> otomatis jadi esay)."],
-    ["2) soalText wajib diisi."],
-    ["3) Untuk pilihanGanda, isi minimal pilihan1 & pilihan2. pilihan3-5 opsional."],
-    ["4) kunciJawaban untuk pilihanGanda boleh angka 1-5, huruf A-E, atau teks jawaban yang sama persis dengan salah satu pilihan."],
-    ["5) kunciJawaban untuk teksSingkat isi jawaban benar, kalau lebih dari satu pisahkan dengan koma. Contoh: 2, dua"],
-    ["6) esay tidak perlu kunciJawaban dan pilihan."],
-    ["7) gambarUrl opsional: isi URL gambar (preview tampil), tapi tidak upload file otomatis."],
-  ];
-  const wsPetunjuk = XLSX.utils.aoa_to_sheet(petunjuk);
-
-  const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, wsSetting, "PENGATURAN_UJIAN");
-  XLSX.utils.book_append_sheet(wb, wsSoal, "TEMPLATE_SOAL");
-  XLSX.utils.book_append_sheet(wb, wsPetunjuk, "PETUNJUK");
-
-  return wb;
-};
-
-const normalizeTipe = (raw) => {
-  const v = String(raw || "").trim().toLowerCase();
-  if (!v) return "pilihanGanda";
-  if (["pg", "pilihanganda", "pilihan ganda", "pilihan_ganda"].includes(v))
-    return "pilihanGanda";
-  if (["teks", "singkat", "teks singkat", "textsingkat", "short"].includes(v))
-    return "teksSingkat";
-  if (["esai", "essay", "esay", "uraian"].includes(v)) return "esay";
-  return "pilihanGanda";
-};
-
-const parseKunciPG = (rawKunci, pilihanTexts) => {
-  const v = String(rawKunci || "").trim();
-  if (!v) return 1;
-
-  const num = parseInt(v, 10);
-  if (!Number.isNaN(num) && num >= 1 && num <= pilihanTexts.length) return num;
-
-  const letterMap = { A: 1, B: 2, C: 3, D: 4, E: 5 };
-  const up = v.toUpperCase();
-  if (letterMap[up] && letterMap[up] <= pilihanTexts.length)
-    return letterMap[up];
-
-  const idx = pilihanTexts.findIndex(
-    (p) => String(p).trim().toLowerCase() === v.toLowerCase()
-  );
-  if (idx !== -1) return idx + 1;
-
-  return 1;
-};
-
-const pad2 = (n) => String(n).padStart(2, "0");
-
-const excelDateToISO = (val) => {
-  if (!val) return "";
-  if (val instanceof Date && !isNaN(val)) {
-    return val.toISOString().slice(0, 10);
-  }
-  if (typeof val === "number") {
-    const d = XLSX.SSF.parse_date_code(val);
-    if (d && d.y && d.m && d.d) {
-      return `${d.y}-${pad2(d.m)}-${pad2(d.d)}`;
-    }
-  }
-  const s = String(val).trim();
-  const m1 = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
-  if (m1) {
-    const [_, dd, mm, yyyy] = m1;
-    return `${yyyy}-${pad2(mm)}-${pad2(dd)}`;
-  }
-  const m2 = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
-  if (m2) {
-    const [_, yyyy, mm, dd] = m2;
-    return `${yyyy}-${pad2(mm)}-${pad2(dd)}`;
-  }
-  return s;
-};
-
-const excelTimeToHHMM = (val) => {
-  if (!val) return "";
-  if (typeof val === "number") {
-    const totalMinutes = Math.round(val * 24 * 60);
-    const hh = Math.floor(totalMinutes / 60);
-    const mm = totalMinutes % 60;
-    return `${pad2(hh)}:${pad2(mm)}`;
-  }
-  const s = String(val).trim();
-  const m = s.match(/^(\d{1,2})[:.](\d{1,2})/);
-  if (m) return `${pad2(m[1])}:${pad2(m[2])}`;
-  return s;
-};
-
-const excelBoolToJS = (val) => {
-  const v = String(val || "").trim().toLowerCase();
-  if (["true", "1", "ya", "yes", "y"].includes(v)) return true;
-  return false;
 };
 
 const TambahSoal = () => {
@@ -241,6 +53,7 @@ const TambahSoal = () => {
     {
       id: 1,
       tipeSoal: "pilihanGanda",
+      bobot: 1, // Default bobot
       soalText: "",
       gambar: null,
       gambarPreview: null,
@@ -250,10 +63,15 @@ const TambahSoal = () => {
       ],
       kunciJawaban: 1,
       kunciJawabanText: "",
+      allowedTypes: [],
+      maxSize: 5,
+      maxCount: 1,
     },
   ]);
 
   const excelInputRef = useRef(null);
+
+  // --- Logic State Management Form ---
 
   const handleFileChange = (soalId, file) => {
     const updated = daftarSoal.map((s) => {
@@ -276,6 +94,7 @@ const TambahSoal = () => {
       {
         id: newId,
         tipeSoal: "pilihanGanda",
+        bobot: 1,
         soalText: "",
         gambar: null,
         gambarPreview: null,
@@ -285,8 +104,38 @@ const TambahSoal = () => {
         ],
         kunciJawaban: 1,
         kunciJawabanText: "",
+        allowedTypes: [],
+        maxSize: 5,
+        maxCount: 1,
       },
     ]);
+  };
+
+  const handleAllowedTypeChange = (soalId, exts) => {
+    setDaftarSoal((prev) =>
+      prev.map((s) => {
+        if (s.id !== soalId) return s;
+
+        const current = s.allowedTypes || [];
+        const hasAny = exts.some((ext) => current.includes(ext));
+
+        let next = [...current];
+
+        if (hasAny) {
+          // Jika grup sedang aktif, uncheck = hapus semua ekstensi di grup
+          next = next.filter((ext) => !exts.includes(ext));
+        } else {
+          // Jika grup belum aktif, check = tambahkan semua ekstensi di grup
+          exts.forEach((ext) => {
+            if (!next.includes(ext)) {
+              next.push(ext);
+            }
+          });
+        }
+
+        return { ...s, allowedTypes: next };
+      })
+    );
   };
 
   const handleHapusSoal = (id) => {
@@ -363,222 +212,62 @@ const TambahSoal = () => {
     );
   };
 
-  // ---------- Excel Actions ----------
+  // ---------- Excel Handlers ----------
   const handleDownloadTemplate = () => {
     const wb = buildTemplateWorkbook();
     downloadWorkbook(wb, "template_import_ujian_dan_soal.xlsx");
   };
 
   const handleExportSoalExcel = () => {
-    const settingHeaders = [
-      "keterangan",
-      "tanggalMulai",
-      "tanggalBerakhir",
-      "jamMulai",
-      "jamBerakhir",
-      "durasiMenit",
-      "acakSoal",
-      "acakOpsi",
-    ];
-
-    const settingRow = [
-      {
-        keterangan: keterangan || "",
-        tanggalMulai: tanggal || "",
-        tanggalBerakhir: tanggalBerakhir || "",
-        jamMulai: jamMulai || "",
-        jamBerakhir: jamBerakhir || "",
-        durasiMenit: durasi || "",
-        acakSoal: acakSoal ? "TRUE" : "FALSE",
-        acakOpsi: acakOpsi ? "TRUE" : "FALSE",
-      },
-    ];
-
-    const wsSetting = XLSX.utils.json_to_sheet(settingRow, {
-      header: settingHeaders,
-    });
-    XLSX.utils.sheet_add_aoa(wsSetting, [settingHeaders], { origin: "A1" });
-
-    const soalHeaders = [
-      "tipeSoal",
-      "soalText",
-      "pilihan1",
-      "pilihan2",
-      "pilihan3",
-      "pilihan4",
-      "pilihan5",
-      "kunciJawaban",
-      "gambarUrl",
-    ];
-
-    const soalRows = daftarSoal.map((s) => {
-      const pilihanTexts =
-        s.tipeSoal === "pilihanGanda" ? s.pilihan.map((p) => p.text) : [];
-      return {
-        tipeSoal: s.tipeSoal,
-        soalText: s.soalText,
-        pilihan1: pilihanTexts[0] || "",
-        pilihan2: pilihanTexts[1] || "",
-        pilihan3: pilihanTexts[2] || "",
-        pilihan4: pilihanTexts[3] || "",
-        pilihan5: pilihanTexts[4] || "",
-        kunciJawaban:
-          s.tipeSoal === "pilihanGanda"
-            ? String(s.kunciJawaban || 1)
-            : s.tipeSoal === "teksSingkat"
-            ? s.kunciJawabanText || ""
-            : "",
-        gambarUrl: s.gambarPreview && !s.gambar ? s.gambarPreview : "",
-      };
-    });
-
-    const wsSoal = XLSX.utils.json_to_sheet(soalRows, { header: soalHeaders });
-    XLSX.utils.sheet_add_aoa(wsSoal, [soalHeaders], { origin: "A1" });
-
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, wsSetting, "PENGATURAN_UJIAN");
-    XLSX.utils.book_append_sheet(wb, wsSoal, "TEMPLATE_SOAL");
-
+    const dataToExport = {
+      keterangan,
+      tanggal,
+      tanggalBerakhir,
+      jamMulai,
+      jamBerakhir,
+      durasi,
+      acakSoal,
+      acakOpsi,
+      daftarSoal,
+    };
+    const wb = generateWorkbookFromState(dataToExport);
     downloadWorkbook(wb, "export_ujian_dan_soal.xlsx");
   };
 
   const handleImportExcelFile = async (file) => {
-    try {
-      const buffer = await file.arrayBuffer();
-      const wb = XLSX.read(buffer, { type: "array", cellDates: true });
-
-      // --- Import Pengaturan (opsional) ---
-      const settingSheetName = wb.SheetNames.find(
-        (n) => n.toLowerCase() === "pengaturan_ujian"
-      );
-      if (settingSheetName) {
-        const wsSetting = wb.Sheets[settingSheetName];
-        const settingJson = XLSX.utils.sheet_to_json(wsSetting, {
-          defval: "",
-          raw: false,
-        });
-        const s0 = settingJson[0] || {};
-        const norm = Object.fromEntries(
-          Object.entries(s0).map(([k, v]) => [String(k).trim().toLowerCase(), v])
-        );
-
-        setKeterangan(String(norm["keterangan"] || ""));
-        setTanggal(excelDateToISO(norm["tanggalmulai"] || norm["tanggal_mulai"]));
-        setTanggalBerakhir(
-          excelDateToISO(norm["tanggalberakhir"] || norm["tanggal_berakhir"])
-        );
-        setJamMulai(excelTimeToHHMM(norm["jammulai"] || norm["jam_mulai"]));
-        setJamBerakhir(
-          excelTimeToHHMM(norm["jamberakhir"] || norm["jam_berakhir"])
-        );
-        setDurasi(String(norm["durasimenit"] || norm["durasi"] || ""));
-        setAcakSoal(excelBoolToJS(norm["acaksoal"]));
-        setAcakOpsi(excelBoolToJS(norm["acakopsi"]));
-      }
-
-      // --- Import Soal ---
-      const soalSheetName =
-        wb.SheetNames.find((n) =>
-          ["template_soal", "soal", "sheet1"].includes(n.toLowerCase())
-        ) || wb.SheetNames[0];
-
-      const wsSoal = wb.Sheets[soalSheetName];
-      const json = XLSX.utils.sheet_to_json(wsSoal, { defval: "" });
-
-      const imported = [];
-      let idCounter = 1;
-
-      for (const row of json) {
-        const lowerRow = Object.fromEntries(
-          Object.entries(row).map(([k, v]) => [
-            String(k).trim().toLowerCase(),
-            v,
-          ])
-        );
-
-        const tipeSoal = normalizeTipe(
-          lowerRow["tipesoal"] || lowerRow["tipe_soal"]
-        );
-        const soalText =
-          lowerRow["soaltext"] ||
-          lowerRow["soal_text"] ||
-          lowerRow["pertanyaan"] ||
-          "";
-
-        if (!String(soalText).trim()) continue;
-
-        const pilihanTexts = [];
-        for (let i = 1; i <= 5; i++) {
-          const val =
-            lowerRow[`pilihan${i}`] ||
-            lowerRow[`opsi${i}`] ||
-            lowerRow[`opsi ${i}`] ||
-            lowerRow[`choice${i}`] ||
-            "";
-          if (String(val).trim()) pilihanTexts.push(String(val));
-        }
-
-        let pgTexts = pilihanTexts;
-        if (tipeSoal === "pilihanGanda") {
-          if (pgTexts.length < 2) pgTexts = [...pgTexts, "", ""].slice(0, 2);
-        } else {
-          pgTexts = [];
-        }
-
-        const kunciRaw =
-          lowerRow["kuncijawaban"] ||
-          lowerRow["kunci_jawaban"] ||
-          lowerRow["jawaban"] ||
-          "";
-
-        const gambarUrl =
-          lowerRow["gambarurl"] || lowerRow["gambar_url"] || "";
-
-        const pilihanObjs = pgTexts.map((t, idx) => ({
-          id: idx + 1,
-          text: t,
-        }));
-
-        imported.push({
-          id: idCounter++,
-          tipeSoal,
-          soalText: String(soalText),
-          gambar: null,
-          gambarPreview: String(gambarUrl).trim() || null,
-          pilihan:
-            tipeSoal === "pilihanGanda"
-              ? pilihanObjs
-              : [
-                  { id: 1, text: "" },
-                  { id: 2, text: "" },
-                ],
-          kunciJawaban:
-            tipeSoal === "pilihanGanda"
-              ? parseKunciPG(kunciRaw, pgTexts)
-              : 1,
-          kunciJawabanText:
-            tipeSoal === "teksSingkat" ? String(kunciRaw) : "",
-        });
-      }
-
-      if (imported.length === 0) {
-        alert("File Excel tidak berisi soal yang valid.");
-        return;
-      }
-
-      setDaftarSoal(imported);
-      alert(`Berhasil import ${imported.length} soal dari Excel.`);
-    } catch (err) {
-      console.error(err);
-      alert("Gagal membaca file Excel. Pastikan formatnya sesuai template.");
+  try {
+    const { settings, soalList } = await parseWorkbookToState(file);
+    if (settings) {
+      setKeterangan(settings.keterangan);
+      setTanggal(settings.tanggal);
+      setTanggalBerakhir(settings.tanggalBerakhir);
+      setJamMulai(settings.jamMulai);
+      setJamBerakhir(settings.jamBerakhir);
+      setDurasi(settings.durasi);
+      setAcakSoal(settings.acakSoal);
+      setAcakOpsi(settings.acakOpsi);
     }
-  };
+    if (soalList && soalList.length > 0) {
+      setDaftarSoal(soalList);
+
+      // ✅ Ganti alert dengan banner sukses yang bagus
+      setSuccessMessage(`Berhasil import ${soalList.length} soal dari Excel.`);
+      setTimeout(() => setSuccessMessage(""), 5000);
+    } else {
+      alert("File Excel tidak berisi soal yang valid.");
+    }
+  } catch (err) {
+    console.error(err);
+    alert("Gagal membaca file Excel. Pastikan formatnya sesuai template.");
+  }
+};
+
 
   const handleClickImport = () => {
     if (excelInputRef.current) excelInputRef.current.click();
   };
 
-  // === SUBMIT ===
+  // === SUBMIT TO SERVER ===
   const handleSubmit = async (e) => {
     e.preventDefault();
 
@@ -597,6 +286,9 @@ const TambahSoal = () => {
 
     const soalList = daftarSoal.map((s) => ({
       tipeSoal: s.tipeSoal,
+      bobot: Number.isNaN(parseInt(s.bobot, 10))
+        ? 1
+        : parseInt(s.bobot, 10),
       soalText: s.soalText,
       pilihan:
         s.tipeSoal === "pilihanGanda" ? s.pilihan.map((p) => p.text) : [],
@@ -606,6 +298,9 @@ const TambahSoal = () => {
           : s.tipeSoal === "teksSingkat"
           ? s.kunciJawabanText || ""
           : "",
+      allowedTypes: s.tipeSoal === "soalDokumen" ? s.allowedTypes : [],
+      maxSize: s.tipeSoal === "soalDokumen" ? s.maxSize : 0,
+      maxCount: s.tipeSoal === "soalDokumen" ? s.maxCount : 0,
     }));
 
     const formData = new FormData();
@@ -630,8 +325,6 @@ const TambahSoal = () => {
 
     try {
       const token = getAdminToken();
-      if (!token) throw new Error("Token tidak ditemukan.");
-
       const res = await fetch("http://localhost:5000/api/ujian", {
         method: "POST",
         headers: { Authorization: `Bearer ${token}` },
@@ -644,6 +337,7 @@ const TambahSoal = () => {
       setSuccessMessage("Ujian Berhasil Disimpan");
       setTimeout(() => setSuccessMessage(""), 7000);
 
+      // Reset form
       setKeterangan("");
       setTanggal("");
       setTanggalBerakhir("");
@@ -657,6 +351,7 @@ const TambahSoal = () => {
         {
           id: 1,
           tipeSoal: "pilihanGanda",
+          bobot: 1,
           soalText: "",
           gambar: null,
           gambarPreview: null,
@@ -666,6 +361,9 @@ const TambahSoal = () => {
           ],
           kunciJawaban: 1,
           kunciJawabanText: "",
+          allowedTypes: [],
+          maxSize: 5,
+          maxCount: 1,
         },
       ]);
     } catch (err) {
@@ -679,78 +377,139 @@ const TambahSoal = () => {
   const inputClass =
     "block w-full rounded-md border border-gray-300 bg-white shadow-sm focus:border-blue-500 focus:ring focus:ring-blue-200 focus:ring-opacity-50 text-sm py-2.5 px-3";
   const textAreaClass =
-    "block w-full rounded-md border border-gray-300 bg-white shadow-sm focus:border-blue-500 focus:ring focus:ring-blue-200 focus:ring-opacity-50 text-sm p-3 min-h-[100px]";
+    "block w-full rounded-md border border-gray-300 bg-white shadow-sm focus:border-blue-500 focus:ring-blue-200 focus:ring-opacity-50 text-sm p-3 min-h-[100px]";
   const fieldsetClass =
     "bg-white rounded-xl border border-gray-100 shadow-sm p-6 transition duration-200";
 
   return (
-    <div className="bg-gray-50 min-h-screen">
+    <div className="bg-gray-50 min-h-screen pb-10">
+      {/* TOAST SUCCESS */}
       {successMessage && (
-        <div className="fixed top-20 left-1/2 -translate-x-1/2 z-40">
-          <div className="flex items-center gap-3 bg-green-600 text-white px-5 py-3 rounded-lg shadow-lg">
-            <FaCheckCircle className="text-white w-5 h-5" />
-            <span className="font-semibold text-base">{successMessage}</span>
+        <div className="fixed top-20 left-1/2 -translate-x-1/2 z-[100] w-full max-w-sm px-4">
+          <div className="flex items-center gap-3 bg-green-600 text-white px-5 py-3 rounded-lg shadow-lg animate-bounce-in">
+            <FaCheckCircle className="text-white w-5 h-5 flex-shrink-0" />
+            <span className="font-semibold text-sm">{successMessage}</span>
           </div>
         </div>
       )}
 
-      <div className="bg-white shadow-sm border-b border-gray-300 px-8 py-4 flex justify-between items-center sticky top-0 z-50">
-        <h2 className="text-2xl font-semibold text-gray-900 flex items-center gap-2">
-          🧩 Tambah Ujian
+      {/* INPUT FILE HIDDEN */}
+      <input
+        ref={excelInputRef}
+        type="file"
+        accept=".xlsx,.xls"
+        className="hidden"
+        onChange={(e) => {
+          const f = e.target.files?.[0];
+          if (f) handleImportExcelFile(f);
+          e.target.value = "";
+        }}
+      />
+
+      {/* ===========================
+          NAVBAR (Sticky Top)
+      ============================ */}
+      <div className="bg-white shadow-sm border-b border-gray-300 py-4 pl-14 pr-4 md:px-8 md:py-5 sticky top-0 z-50 flex flex-wrap gap-y-3 justify-between items-center transition-all">
+        {/* JUDUL HALAMAN */}
+        <h2 className="text-xl md:text-2xl font-semibold text-gray-900 flex items-center gap-2">
+          {/* Icon disembunyikan di mobile (hidden), muncul di md ke atas */}
+          <span className="hidden md:inline-block text-blue-600 text-2xl">
+            🧩
+          </span>
+          <span>Tambah Ujian</span>
         </h2>
 
-        <div className="flex gap-2 flex-wrap">
+        {/* TOMBOL AKSI - HANYA TAMPIL DI DESKTOP/TABLET (md ke atas) */}
+        {/* Menggunakan 'flex-wrap' agar aman saat dibuka di tablet portrait */}
+        <div className="hidden md:flex gap-2 flex-wrap items-center justify-end">
           <button
             type="button"
             onClick={handleDownloadTemplate}
-            className="flex items-center gap-2 py-2 px-4 rounded-md bg-emerald-600 text-white font-semibold shadow hover:bg-emerald-700 transition text-sm"
+            className="flex items-center gap-2 py-2 px-3 lg:px-4 rounded-md bg-emerald-600 text-white font-semibold shadow hover:bg-emerald-700 transition text-xs lg:text-sm whitespace-nowrap"
           >
-            <FaDownload className="w-4 h-4" />
-            Template Excel
+            <FaDownload />
+            <span className="hidden lg:inline">Template</span> Excel
           </button>
 
           <button
             type="button"
             onClick={handleExportSoalExcel}
-            className="flex items-center gap-2 py-2 px-4 rounded-md bg-indigo-600 text-white font-semibold shadow hover:bg-indigo-700 transition text-sm"
+            className="flex items-center gap-2 py-2 px-3 lg:px-4 rounded-md bg-indigo-600 text-white font-semibold shadow hover:bg-indigo-700 transition text-xs lg:text-sm whitespace-nowrap"
           >
-            <FaFileExcel className="w-4 h-4" />
-            Export Ujian
+            <FaFileExcel />
+            Export
           </button>
 
           <button
             type="button"
             onClick={handleClickImport}
-            className="flex items-center gap-2 py-2 px-4 rounded-md bg-orange-600 text-white font-semibold shadow hover:bg-orange-700 transition text-sm"
+            className="flex items-center gap-2 py-2 px-3 lg:px-4 rounded-md bg-orange-600 text-white font-semibold shadow hover:bg-orange-700 transition text-xs lg:text-sm whitespace-nowrap"
           >
-            <FaUpload className="w-4 h-4" />
-            Import Excel
+            <FaUpload />
+            Import
           </button>
 
           <button
             type="submit"
             form="form-ujian"
-            className="flex items-center gap-2 py-2.5 px-5 rounded-md bg-blue-600 text-white font-semibold shadow hover:bg-blue-700 transition text-sm"
+            className="flex items-center gap-2 py-2 px-4 lg:px-5 rounded-md bg-blue-600 text-white font-semibold shadow hover:bg-blue-700 transition text-xs lg:text-sm whitespace-nowrap"
           >
-            <FaSave className="w-4 h-4" />
-            Simpan Semua Soal
+            <FaSave />
+            Simpan
           </button>
-
-          <input
-            ref={excelInputRef}
-            type="file"
-            accept=".xlsx,.xls"
-            className="hidden"
-            onChange={(e) => {
-              const f = e.target.files?.[0];
-              if (f) handleImportExcelFile(f);
-              e.target.value = "";
-            }}
-          />
         </div>
       </div>
 
-      <div className="p-6 md:p-10">
+      {/* ===========================
+          KONTEN UTAMA
+      ============================ */}
+      <div className="p-4 md:p-10">
+        
+        {/* MENU AKSI MOBILE (Hanya tampil di layar HP < md) */}
+        <div className="md:hidden mb-6 bg-white rounded-xl border border-gray-200 shadow-sm p-4">
+          <h3 className="text-sm font-semibold text-gray-700 mb-3 border-b border-gray-100 pb-2">
+            Menu Aksi Cepat
+          </h3>
+          <div className="grid grid-cols-2 gap-3">
+            <button
+              type="button"
+              onClick={handleDownloadTemplate}
+              className="flex flex-col items-center justify-center gap-1 py-3 px-2 rounded-lg bg-emerald-50 text-emerald-700 font-medium hover:bg-emerald-100 transition text-xs border border-emerald-100"
+            >
+              <FaDownload className="w-5 h-5 mb-1" />
+              Template Excel
+            </button>
+
+            <button
+              type="button"
+              onClick={handleExportSoalExcel}
+              className="flex flex-col items-center justify-center gap-1 py-3 px-2 rounded-lg bg-indigo-50 text-indigo-700 font-medium hover:bg-indigo-100 transition text-xs border border-indigo-100"
+            >
+              <FaFileExcel className="w-5 h-5 mb-1" />
+              Export Ujian
+            </button>
+
+            <button
+              type="button"
+              onClick={handleClickImport}
+              className="flex flex-col items-center justify-center gap-1 py-3 px-2 rounded-lg bg-orange-50 text-orange-700 font-medium hover:bg-orange-100 transition text-xs border border-orange-100"
+            >
+              <FaUpload className="w-5 h-5 mb-1" />
+              Import Excel
+            </button>
+
+            <button
+              type="submit"
+              form="form-ujian"
+              className="flex flex-col items-center justify-center gap-1 py-3 px-2 rounded-lg bg-blue-600 text-white font-medium shadow hover:bg-blue-700 transition text-xs"
+            >
+              <FaSave className="w-5 h-5 mb-1" />
+              Simpan Soal
+            </button>
+          </div>
+        </div>
+
+        {/* FORM UJIAN */}
         <form
           id="form-ujian"
           onSubmit={handleSubmit}
@@ -851,8 +610,8 @@ const TambahSoal = () => {
                   required
                 />
                 <p className="text-xs text-gray-500 mt-1">
-                  Ini adalah waktu hitung mundur yang akan didapat peserta setelah
-                  menekan tombol "Mulai".
+                  Ini adalah waktu hitung mundur yang akan didapat peserta
+                  setelah menekan tombol "Mulai".
                 </p>
               </div>
             </div>
@@ -910,7 +669,9 @@ const TambahSoal = () => {
                 <input
                   type="file"
                   accept="image/*"
-                  onChange={(e) => handleFileChange(soal.id, e.target.files[0])}
+                  onChange={(e) =>
+                    handleFileChange(soal.id, e.target.files[0])
+                  }
                   className="block text-sm border border-gray-300 rounded-md p-1 w-full"
                 />
                 {soal.gambarPreview && (
@@ -922,6 +683,7 @@ const TambahSoal = () => {
                 )}
               </div>
 
+              {/* GRID SOAL & BOBOT */}
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div>
                   <label className={labelClass}>Tipe Soal</label>
@@ -933,12 +695,31 @@ const TambahSoal = () => {
                     className={inputClass}
                   >
                     <option value="pilihanGanda">Pilihan Ganda</option>
-                    <option value="teksSingkat">Teks Singkat (Auto-Nilai)</option>
-                    <option value="esay">Esai (Nilai Manual)</option>
+                    <option value="teksSingkat">
+                      Teks Singkat (Auto-Nilai)
+                    </option>
+                    <option value="esai">Esai (Nilai Manual)</option>
+                    <option value="soalDokumen">
+                      Soal Dokumen (Upload File)
+                    </option>
                   </select>
                 </div>
 
-                <div className="md:col-span-2">
+                <div>
+                  <label className={labelClass}>Bobot Nilai</label>
+                  <input
+                    type="number"
+                    min="0"
+                    value={soal.bobot || 1}
+                    onChange={(e) =>
+                      handleSoalChange(soal.id, "bobot", e.target.value)
+                    }
+                    className={inputClass}
+                    placeholder="Default: 1"
+                  />
+                </div>
+
+                <div className="md:col-span-3">
                   <label className={labelClass}>Pertanyaan</label>
                   <textarea
                     value={soal.soalText}
@@ -969,7 +750,9 @@ const TambahSoal = () => {
                       <input
                         type="radio"
                         checked={soal.kunciJawaban === p.id}
-                        onChange={() => handleKunciJawabanChange(soal.id, p.id)}
+                        onChange={() =>
+                          handleKunciJawabanChange(soal.id, p.id)
+                        }
                         className="h-4 w-4 text-blue-600"
                       />
                       <input
@@ -1031,20 +814,111 @@ const TambahSoal = () => {
                 </div>
               )}
 
-              {soal.tipeSoal === "esay" && (
+              {soal.tipeSoal === "esai" && (
                 <div className="bg-blue-50 border-l-4 border-blue-400 p-3 rounded-r-md mt-4">
                   <div className="flex">
                     <FaCheckCircle className="h-5 w-5 text-blue-400 mt-0.5" />
                     <p className="ml-3 text-sm text-blue-700">
-                      Untuk soal esai, jawaban akan dinilai manual oleh pengajar.
+                      Untuk soal esai, jawaban akan dinilai manual oleh
+                      pengajar.
                     </p>
+                  </div>
+                </div>
+              )}
+
+              {soal.tipeSoal === "soalDokumen" && (
+                <div className="bg-purple-50 border-l-4 border-purple-400 p-4 rounded-r-md mt-4 space-y-4">
+                  <div className="flex mb-2">
+                    <FaCheckCircle className="h-5 w-5 text-purple-400 mt-0.5" />
+                    <p className="ml-3 text-sm text-purple-700 font-semibold">
+                      Konfigurasi Upload Dokumen Peserta
+                    </p>
+                  </div>
+
+                  {/* 1. PILIH TIPE FILE */}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Tipe File yang Diizinkan:
+                    </label>
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                      {FILE_TYPE_GROUPS.map((group) => {
+                        const current = soal.allowedTypes || [];
+                        const checked = group.exts.some((ext) =>
+                          current.includes(ext)
+                        );
+                        return (
+                          <label
+                            key={group.label}
+                            className="flex items-center space-x-2 text-sm bg-white p-2 rounded border border-gray-200"
+                          >
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={() =>
+                                handleAllowedTypeChange(soal.id, group.exts)
+                              }
+                              className="rounded text-purple-600 focus:ring-purple-500"
+                            />
+                            <span>{group.label}</span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                    {(soal.allowedTypes || []).length === 0 && (
+                      <p className="text-xs text-orange-600 mt-1">
+                        * Jika tidak ada yang dipilih, semua jenis file akan
+                        diizinkan (Tidak disarankan).
+                      </p>
+                    )}
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {/* 2. MAX SIZE */}
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Maksimal Ukuran File (MB)
+                      </label>
+                      <input
+                        type="number"
+                        min="1"
+                        max="20"
+                        value={soal.maxSize || 5}
+                        onChange={(e) =>
+                          handleSoalChange(soal.id, "maxSize", e.target.value)
+                        }
+                        className={inputClass}
+                      />
+                      <p className="text-xs text-gray-500">
+                        Contoh: 5 untuk 5 MB.
+                      </p>
+                    </div>
+
+                    {/* 3. MAX JUMLAH FILE */}
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Maksimal Jumlah File Upload
+                      </label>
+                      <input
+                        type="number"
+                        min="1"
+                        max="10"
+                        value={soal.maxCount || 1}
+                        onChange={(e) =>
+                          handleSoalChange(soal.id, "maxCount", e.target.value)
+                        }
+                        className={inputClass}
+                      />
+                      <p className="text-xs text-gray-500">
+                        Berapa file yang boleh diupload peserta untuk soal ini.
+                      </p>
+                    </div>
                   </div>
                 </div>
               )}
             </fieldset>
           ))}
 
-          <div className="flex justify-between items-center">
+          <div className="flex justify-between items-center pb-8">
             <button
               type="button"
               onClick={handleTambahSoal}

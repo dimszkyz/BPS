@@ -1,7 +1,3 @@
-// File: src/page/PartSoal.jsx
-// UPDATED: acak opsi pilihan ganda per peserta + simpan urutan opsi di localStorage
-// (tetap include autosave draft ke backend + beacon on close)
-
 import React, {
   useEffect,
   useState,
@@ -20,6 +16,10 @@ import {
   FaCalendarAlt,
   FaRegClock,
   FaInfoCircle,
+  FaFileAlt,
+  FaTrash,
+  FaExclamationCircle, // Icon untuk error
+  FaTimes // Icon close
 } from "react-icons/fa";
 import SubmitUjianModal from "../component/submitujian.jsx";
 
@@ -48,15 +48,25 @@ const StatusUjianBox = ({
   timerDisplay,
   soalList,
   jawabanUser,
+  dokumenFiles,
   raguRagu,
   currentIndex,
   onNavClick,
   onSubmit,
 }) => {
   const getStatusSoal = (idx) => {
-    const soalId = soalList[idx]?.id;
+    const soal = soalList[idx];
+    const soalId = soal?.id;
     if (!soalId) return "belum";
+
     if (raguRagu[soalId]) return "ragu";
+
+    // ✅ Cek status soal dokumen berdasarkan file yang ada di state
+    if (soal?.tipeSoal === "soalDokumen") {
+      const files = dokumenFiles?.[soalId] || [];
+      return files.length > 0 ? "jawab" : "belum";
+    }
+
     if (jawabanUser[soalId] && jawabanUser[soalId] !== "") return "jawab";
     return "belum";
   };
@@ -224,7 +234,13 @@ const PartSoal = () => {
   const [displayJamBerakhir, setDisplayJamBerakhir] = useState("");
   const [soalList, setSoalList] = useState([]);
   const [currentIndex, setCurrentIndex] = useState(0);
+  
   const [jawabanUser, setJawabanUser] = useState({});
+  const [dokumenFiles, setDokumenFiles] = useState({}); // { soalId: [{name, path, uploaded: true}] }
+  
+  const [isDragOver, setIsDragOver] = useState(false);
+  const dokumenInputRef = useRef(null);
+
   const [raguRagu, setRaguRagu] = useState({});
   const [sisaDetik, setSisaDetik] = useState(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -236,12 +252,20 @@ const PartSoal = () => {
   const [showConfirmModal, setShowConfirmModal] = useState(false);
   const [showAutoSubmitModal, setShowAutoSubmitModal] = useState(false);
   const [autoSubmitCountdown, setAutoSubmitCountdown] = useState(10);
+  
+  // -- NEW STATE FOR NOTIFICATION --
+  const [notification, setNotification] = useState(null); // { message, type: 'error'|'success' }
+  const notificationTimeoutRef = useRef(null);
+
   const countdownIntervalRef = useRef(null);
 
   useEffect(() => {
     return () => {
       if (countdownIntervalRef.current) {
         clearInterval(countdownIntervalRef.current);
+      }
+      if (notificationTimeoutRef.current) {
+        clearTimeout(notificationTimeoutRef.current);
       }
     };
   }, []);
@@ -266,6 +290,18 @@ const PartSoal = () => {
   };
   const padTime = (t) => (t?.length === 5 ? `${t}:00` : t || "00:00:00");
 
+  // --- SHOW NOTIFICATION HELPER ---
+  const showNotification = (message, type = 'error') => {
+    if (notificationTimeoutRef.current) clearTimeout(notificationTimeoutRef.current);
+    
+    setNotification({ message, type });
+    
+    // Auto hide after 4 seconds
+    notificationTimeoutRef.current = setTimeout(() => {
+      setNotification(null);
+    }, 4000);
+  };
+
   const getProgressKey = useCallback(() => {
     const peserta = JSON.parse(localStorage.getItem("pesertaData"));
     const pesertaId = peserta?.id;
@@ -286,7 +322,6 @@ const PartSoal = () => {
     return `order_${pesertaId}_${id}`;
   }, [id]);
 
-  // NEW: key urutan opsi per soal per peserta
   const getOptionOrderKey = useCallback(
     (soalId) => {
       const peserta = JSON.parse(localStorage.getItem("pesertaData"));
@@ -313,20 +348,17 @@ const PartSoal = () => {
         const data = await res.json();
         if (!res.ok) throw new Error(data.message || "Gagal memuat ujian.");
 
-        // 1. Set Info Tampilan
         setKeterangan(data.keterangan || "");
         setDisplayTanggal(data.tanggal || "");
         setDisplayJamMulai(data.jam_mulai || "");
         setDisplayJamBerakhir(data.jam_berakhir || "");
 
-        // 2. Set DURASI
         const durasiDariDb = parseInt(data.durasi, 10) || 0;
         if (durasiDariDb <= 0) {
           throw new Error("Durasi ujian tidak valid (0 menit).");
         }
         setDurasiMenit(durasiDariDb);
 
-        // 3. Set JENDELA WAKTU
         const tglMulai = toLocalDateOnly(data.tanggal);
         const tglBerakhir = toLocalDateOnly(data.tanggal_berakhir);
         const jm = padTime(data.jam_mulai);
@@ -344,7 +376,6 @@ const PartSoal = () => {
         setWindowStartMs(startWindow);
         setWindowEndMs(endWindow);
 
-        // 4. Logika Urutan Soal
         let soalListDariApi = data.soalList || [];
         let soalListTerurut;
         const orderKey = getOrderKey();
@@ -361,24 +392,20 @@ const PartSoal = () => {
           data.acak_opsi === "true";
 
         if (savedOrderJson) {
-          console.log("Memuat urutan soal dari localStorage...");
           const savedSoalIds = JSON.parse(savedOrderJson);
           const soalMap = new Map(soalListDariApi.map((s) => [s.id, s]));
           soalListTerurut = savedSoalIds
             .map((sid) => soalMap.get(sid))
             .filter(Boolean);
         } else if (isAcakSoal) {
-          console.log("Mengacak soal dan menyimpan urutan...");
           const shuffledList = shuffleArray(soalListDariApi);
           const shuffledIds = shuffledList.map((s) => s.id);
           localStorage.setItem(orderKey, JSON.stringify(shuffledIds));
           soalListTerurut = shuffledList;
         } else {
-          console.log("Memuat soal tanpa acak...");
           soalListTerurut = soalListDariApi;
         }
 
-        // 5. Mapping Soal + (NEW) Acak Opsi Pilihan Ganda per Peserta
         const mapped = soalListTerurut.map((s) => {
           let pilihanNormalized = [];
           if (Array.isArray(s.pilihan)) {
@@ -395,7 +422,6 @@ const PartSoal = () => {
             }
           }
 
-          // NEW: acak opsi hanya untuk pilihan ganda
           let pilihanTerurut = pilihanNormalized;
           if (
             isAcakOpsi &&
@@ -404,8 +430,7 @@ const PartSoal = () => {
           ) {
             try {
               const opsiOrderKey = getOptionOrderKey(s.id);
-              const savedOpsiOrderJson =
-                localStorage.getItem(opsiOrderKey);
+              const savedOpsiOrderJson = localStorage.getItem(opsiOrderKey);
 
               if (savedOpsiOrderJson) {
                 const savedOpsiIds = JSON.parse(savedOpsiOrderJson);
@@ -416,7 +441,6 @@ const PartSoal = () => {
                   .map((oid) => opsiMap.get(oid))
                   .filter(Boolean);
 
-                // pakai order saved jika lengkap, kalau tidak fallback
                 if (ordered.length === pilihanNormalized.length) {
                   pilihanTerurut = ordered;
                 } else {
@@ -443,26 +467,60 @@ const PartSoal = () => {
             soalText: s.soalText || "",
             gambarUrl: s.gambar ? `${API_URL}${s.gambar}` : null,
             pilihan: pilihanTerurut,
+            // --- UPDATE: Pastikan fileConfig ada ---
+            fileConfig: s.fileConfig || {}, 
+            // ---------------------------------------
           };
         });
 
         setSoalList(mapped);
 
-        // 6. Inisialisasi State Jawaban dari LocalStorage
         const progressKey = getProgressKey();
         const savedProgress =
           JSON.parse(localStorage.getItem(progressKey)) || {};
+        
         const initJawab = {};
         const initRagu = {};
+        const initDokumenFiles = {}; // Untuk restore file di UI
+
         mapped.forEach((soal) => {
           const soalId = soal.id;
-          initJawab[soalId] = savedProgress.jawabanUser?.[soalId] || "";
+          const savedAns = savedProgress.jawabanUser?.[soalId] || "";
+          
+          initJawab[soalId] = savedAns;
           initRagu[soalId] = savedProgress.raguRagu?.[soalId] || false;
+
+          // 🟢 LOGIKA RESTORE DOKUMEN: Parse JSON Path dari LocalStorage
+          if (soal.tipeSoal === "soalDokumen" && savedAns) {
+            try {
+                // savedAns harusnya string JSON array path: '["/uploads/a.pdf"]'
+                if (savedAns.startsWith('[') && savedAns.endsWith(']')) {
+                    const paths = JSON.parse(savedAns);
+                    if (Array.isArray(paths)) {
+                        initDokumenFiles[soalId] = paths.map(p => ({
+                            name: p.split('/').pop(), // Ambil nama file dari path
+                            path: p,
+                            uploaded: true
+                        }));
+                    }
+                } else if (savedAns.trim() !== "") {
+                    // Fallback untuk format lama (single string)
+                    initDokumenFiles[soalId] = [{
+                        name: savedAns.split('/').pop(),
+                        path: savedAns,
+                        uploaded: true
+                    }];
+                }
+            } catch (e) {
+                console.error("Gagal restore dokumen:", e);
+            }
+          }
         });
+
         setJawabanUser(initJawab);
         setRaguRagu(initRagu);
+        setDokumenFiles(initDokumenFiles);
 
-        // 7. Inisialisasi TIMER
         const nowMs = Date.now();
         if (nowMs < startWindow) {
           throw new Error("Ujian belum dimulai.");
@@ -473,7 +531,6 @@ const PartSoal = () => {
 
         let startTimeMs = savedProgress.startTimeMs;
         if (!startTimeMs) {
-          console.log("Memulai timer ujian...");
           startTimeMs = nowMs;
           savedProgress.startTimeMs = startTimeMs;
           localStorage.setItem(progressKey, JSON.stringify(savedProgress));
@@ -488,7 +545,6 @@ const PartSoal = () => {
           setSisaDetik(sisa);
         }
 
-        // 8. Muat Data Peserta
         try {
           const dataPeserta = JSON.parse(localStorage.getItem("pesertaData"));
           if (dataPeserta && dataPeserta.nama) {
@@ -550,7 +606,7 @@ const PartSoal = () => {
   }, [sisaDetik]);
 
   // =======================================================
-  // AUTO-SAVE PROGRESS -> localStorage
+  // AUTO-SAVE PROGRESS
   // =======================================================
   useEffect(() => {
     if (loading || soalList.length === 0 || sisaDetik === null) return;
@@ -578,7 +634,7 @@ const PartSoal = () => {
   ]);
 
   // =======================================================
-  // AUTO-SAVE DRAFT ke BACKEND /api/hasil/draft
+  // AUTO-SAVE DRAFT ke BACKEND
   // =======================================================
   const saveDraftToServer = useCallback(async () => {
     try {
@@ -613,7 +669,6 @@ const PartSoal = () => {
     return () => clearInterval(iv);
   }, [saveDraftToServer, loading, soalList.length, sisaDetik]);
 
-  // Kirim draft terakhir ketika tab ditutup / refresh / hidden
   useEffect(() => {
     if (loading || soalList.length === 0) return;
 
@@ -687,6 +742,154 @@ const PartSoal = () => {
     setJawabanUser((prev) => ({ ...prev, [soalId]: text }));
   };
 
+  const formatSize = (bytes = 0) => {
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  };
+
+  // --- UPDATE: Validasi File Upload (Size, Count, Type) & UPLOAD LANGSUNG ---
+  const handleTambahDokumen = async (incoming) => {
+    const soal = soalList[currentIndex];
+    if (!soal || !soal.id) return;
+    
+    // Ambil Config dengan Parsing yang Aman
+    const config = soal.fileConfig || {};
+    const maxCount = parseInt(config.maxCount) || 1; // Pastikan Integer
+    const maxSizeMB = parseFloat(config.maxSize) || 5; // Pastikan Float/Number
+    const allowedTypes = Array.isArray(config.allowedTypes) ? config.allowedTypes : [];
+
+    const existingFiles = dokumenFiles[soal.id] || [];
+    const incomingFiles = Array.from(incoming || []).filter(Boolean);
+
+    if (incomingFiles.length === 0) return;
+
+    // 1. Validasi Jumlah File Total
+    if (existingFiles.length + incomingFiles.length > maxCount) {
+      // 🔔 MODIFIKASI: Gunakan showNotification bukan alert
+      showNotification(`Maksimal hanya ${maxCount} file. Anda sudah punya ${existingFiles.length}.`, 'error');
+      return;
+    }
+
+    const filesToUpload = [];
+
+    // Validasi per file
+    for (const file of incomingFiles) {
+        // 2. Validasi Ukuran File
+        const fileSizeMB = file.size / (1024 * 1024);
+        if (fileSizeMB > maxSizeMB) {
+            // 🔔 MODIFIKASI: Gunakan showNotification, format pesan lebih rapi
+            showNotification(
+               `Gagal: "${file.name}" (${fileSizeMB.toFixed(2)} MB) melebihi batas ${maxSizeMB} MB.`,
+               'error'
+            );
+            continue;
+        }
+
+        // 3. Validasi Tipe File (Ekstensi)
+        if (allowedTypes.length > 0) {
+            const parts = file.name.split('.');
+            const ext = parts.length > 1 ? '.' + parts.pop().toLowerCase() : '';
+            
+            // Logic split yang kuat
+            let normalizedAllowedTypes = [];
+            allowedTypes.forEach(typeStr => {
+                if (typeof typeStr === 'string' && typeStr.includes(',')) {
+                    normalizedAllowedTypes.push(...typeStr.split(',').map(s => s.trim().toLowerCase()));
+                } else if (typeof typeStr === 'string') {
+                    normalizedAllowedTypes.push(typeStr.trim().toLowerCase());
+                }
+            });
+
+            const isAllowed = normalizedAllowedTypes.includes(ext);
+            if (!isAllowed) {
+                // 🔔 MODIFIKASI: Gunakan showNotification
+                showNotification(`Gagal: "${file.name}" format tidak diizinkan.`, 'error');
+                continue;
+            }
+        }
+        
+        // Tambahkan ke antrian upload
+        filesToUpload.push(file);
+    }
+
+    if (filesToUpload.length === 0) return;
+
+    // 🚀 PROSES UPLOAD LANGSUNG KE BACKEND
+    // Kita upload satu per satu (atau bisa bulk jika backend support)
+    const uploadedResults = [];
+
+    for (const file of filesToUpload) {
+        const formData = new FormData();
+        formData.append("file", file);
+
+        try {
+            // Kita asumsikan ada loading indikator sederhana (optional)
+            const res = await fetch(`${API_URL}/api/ujian/upload-peserta`, {
+                method: "POST",
+                body: formData
+            });
+            const data = await res.json();
+
+            if (res.ok) {
+                uploadedResults.push({
+                    name: data.originalName,
+                    path: data.filePath, // Path dari server (misal: /uploads_jawaban/xxx.pdf)
+                    uploaded: true
+                });
+                // 🔔 Opsi: Beri notifikasi sukses kecil (opsional)
+                // showNotification(`Berhasil upload ${data.originalName}`, 'success');
+            } else {
+                 showNotification(`Gagal upload ${file.name}: ${data.message}`, 'error');
+            }
+        } catch (err) {
+            console.error("Error uploading file:", err);
+            showNotification(`Terjadi kesalahan saat mengupload ${file.name}`, 'error');
+        }
+    }
+
+    // UPDATE STATE & JAWABAN USER
+    if (uploadedResults.length > 0) {
+        const merged = [...existingFiles, ...uploadedResults];
+        
+        // 1. Update State Visual (Dokumen Files)
+        setDokumenFiles((prev) => ({ ...prev, [soal.id]: merged }));
+        
+        // 2. Update Jawaban User (JSON String Path) -> Ini yang masuk LocalStorage & Database Draft
+        // Kita hanya simpan array path-nya saja
+        const pathsOnly = merged.map(f => f.path);
+        setJawabanUser((prev) => ({
+            ...prev,
+            [soal.id]: JSON.stringify(pathsOnly), // Simpan sebagai string JSON
+        }));
+        
+        // Notifikasi sukses global
+        showNotification(`${uploadedResults.length} file berhasil diunggah`, 'success');
+    }
+  };
+  // --------------------------------------------------------
+
+  const handleHapusDokumen = (soalId, index) => {
+    setDokumenFiles((prev) => {
+      const list = prev[soalId] || [];
+      const newList = list.filter((_, i) => i !== index);
+
+      // Update juga jawabanUser agar sinkron
+      const pathsOnly = newList.map(f => f.path);
+      setJawabanUser((jPrev) => ({
+        ...jPrev,
+        [soalId]: JSON.stringify(pathsOnly),
+      }));
+
+      return { ...prev, [soalId]: newList };
+    });
+  };
+
+  const handleHapusSemuaDokumen = (soalId) => {
+    setDokumenFiles((prev) => ({ ...prev, [soalId]: [] }));
+    setJawabanUser((prev) => ({ ...prev, [soalId]: "" }));
+  };
+
   const toggleRagu = () => {
     const soalId = soalList[currentIndex]?.id;
     if (!soalId) return;
@@ -696,7 +899,9 @@ const PartSoal = () => {
   const handleBatalJawab = () => {
     const soalId = soalList[currentIndex]?.id;
     if (!soalId) return;
+
     setJawabanUser((prev) => ({ ...prev, [soalId]: "" }));
+    setDokumenFiles((prev) => ({ ...prev, [soalId]: [] }));
   };
 
   const gotoPrev = () => {
@@ -720,7 +925,7 @@ const PartSoal = () => {
 
       const peserta = JSON.parse(localStorage.getItem("pesertaData"));
       if (!peserta || !peserta.id) {
-        alert("Data peserta tidak ditemukan...");
+        showNotification("Data peserta tidak ditemukan...", 'error');
         navigate("/");
         return;
       }
@@ -732,7 +937,7 @@ const PartSoal = () => {
         return {
           question_id: soal.id,
           tipe_soal: soal.tipeSoal,
-          jawaban_text: jawaban,
+          jawaban_text: jawaban, // Ini sudah berisi JSON string path untuk dokumen
         };
       });
 
@@ -743,10 +948,12 @@ const PartSoal = () => {
       };
 
       try {
+        // Karena file dokumen SUDAH diupload, kita cukup kirim JSON biasa
+        // Tidak perlu lagi pakai FormData yang kompleks untuk file
         const res = await fetch(`${API_URL}/api/hasil`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload),
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
         });
 
         const data = await res.json();
@@ -754,11 +961,9 @@ const PartSoal = () => {
 
         localStorage.setItem("newHasilUjian", "true");
 
-        // ambil key dulu
         const progressKey = getProgressKey();
         const orderKey = getOrderKey();
 
-        // NEW: hapus juga urutan opsi per soal
         try {
           soalList.forEach((soal) => {
             const ok = getOptionOrderKey(soal.id);
@@ -768,7 +973,6 @@ const PartSoal = () => {
           console.warn("Gagal hapus order opsi:", e.message);
         }
 
-        // hapus semua data ujian di localStorage
         localStorage.removeItem("pesertaData");
         localStorage.removeItem("loginPeserta");
         localStorage.removeItem(progressKey);
@@ -791,7 +995,7 @@ const PartSoal = () => {
           navigate("/selesai");
         }
       } catch (err) {
-        alert("Gagal menyimpan hasil ujian: " + err.message);
+        showNotification("Gagal menyimpan hasil ujian: " + err.message, 'error');
         setIsSubmitting(false);
         setShowConfirmModal(false);
         setShowAutoSubmitModal(false);
@@ -809,9 +1013,6 @@ const PartSoal = () => {
     ]
   );
 
-  // =======================================================
-  // AUTO-SUBMIT saat timer 0
-  // =======================================================
   useEffect(() => {
     if (loading || sisaDetik === null || isSubmitting) return;
 
@@ -852,11 +1053,49 @@ const PartSoal = () => {
     );
 
   const soalAktif = soalList[currentIndex];
-  const jumlahTerjawab = Object.values(jawabanUser).filter((v) => v !== "")
-    .length;
+  const jumlahTerjawab = soalList.filter((soal) => {
+    const soalId = soal.id;
+
+    if (soal.tipeSoal === "soalDokumen") {
+      return (dokumenFiles[soalId] || []).length > 0;
+    }
+
+    const v = jawabanUser[soalId];
+    return v !== "" && v !== null && v !== undefined;
+  }).length;
+
 
   return (
     <>
+      {/* 🔔 CUSTOM NOTIFICATION TOAST */}
+      {notification && (
+        <div 
+          className={`fixed top-6 left-1/2 transform -translate-x-1/2 z-[9999] flex items-center gap-3 px-6 py-3.5 rounded-xl shadow-lg border animate-fade-in-down transition-all duration-300 ${
+            notification.type === 'error' 
+              ? 'bg-white border-red-200 text-red-700' 
+              : 'bg-white border-green-200 text-green-700'
+          }`}
+        >
+           {notification.type === 'error' ? (
+              <FaExclamationCircle className="text-xl flex-shrink-0 text-red-500" />
+           ) : (
+              <FaCheckCircle className="text-xl flex-shrink-0 text-green-500" />
+           )}
+           <div className="flex flex-col">
+              <span className={`font-semibold text-sm ${notification.type === 'error' ? 'text-red-800' : 'text-green-800'}`}>
+                {notification.type === 'error' ? 'Peringatan' : 'Berhasil'}
+              </span>
+              <span className="text-sm opacity-90">{notification.message}</span>
+           </div>
+           <button 
+              onClick={() => setNotification(null)}
+              className="ml-3 p-1 hover:bg-gray-100 rounded-full transition text-gray-400 hover:text-gray-600"
+            >
+              <FaTimes />
+           </button>
+        </div>
+      )}
+
       <div className="flex-1 max-w-7xl w-full mx-auto px-4 py-6 bg-gray-50">
         <div className="flex flex-col lg:flex-row gap-6 items-start">
           {/* Kolom Kiri: Soal */}
@@ -871,8 +1110,10 @@ const PartSoal = () => {
                     {soalAktif?.tipeSoal === "pilihanGanda"
                       ? "Pilihan Ganda"
                       : soalAktif?.tipeSoal === "teksSingkat"
-                      ? "Jawaban Singkat"
-                      : "Esai / Uraian"}
+                        ? "Jawaban Singkat"
+                        : soalAktif?.tipeSoal === "soalDokumen"
+                          ? "Soal Dokumen"
+                          : "Esai / Uraian"}
                   </div>
                 </div>
 
@@ -907,7 +1148,8 @@ const PartSoal = () => {
 
                   <div className="flex items-center gap-2">
                     {/* Tombol Batal */}
-                    {soalAktif?.tipeSoal === "pilihanGanda" &&
+                    {(soalAktif?.tipeSoal === "pilihanGanda" ||
+                      soalAktif?.tipeSoal === "soalDokumen") &&
                       jawabanUser[soalAktif.id] && (
                         <button
                           onClick={handleBatalJawab}
@@ -920,11 +1162,10 @@ const PartSoal = () => {
 
                     <button
                       onClick={toggleRagu}
-                      className={`text-[12px] px-3 py-1.5 rounded-md border ${
-                        raguRagu[soalAktif?.id]
-                          ? "bg-yellow-50 border-yellow-400 text-yellow-700"
-                          : "bg-white border-orange-300 text-gray-600 hover:bg-gray-50"
-                      }`}
+                      className={`text-[12px] px-3 py-1.5 rounded-md border ${raguRagu[soalAktif?.id]
+                        ? "bg-yellow-50 border-yellow-400 text-yellow-700"
+                        : "bg-white border-orange-300 text-gray-600 hover:bg-gray-50"
+                        }`}
                     >
                       {raguRagu[soalAktif?.id]
                         ? "Ditandai ragu-ragu"
@@ -963,18 +1204,16 @@ const PartSoal = () => {
                         <button
                           key={pil.id}
                           onClick={() => handleJawabPilihan(pil.id)}
-                          className={`w-full text-left flex items-start gap-3 rounded-lg border p-4 text-[15px] leading-relaxed transition ${
-                            aktif
-                              ? "bg-white border-blue-500 ring-2 ring-blue-200"
-                              : "bg-white border-gray-300 hover:bg-gray-50 hover:border-blue-300"
-                          }`}
+                          className={`w-full text-left flex items-start gap-3 rounded-lg border p-4 text-[15px] leading-relaxed transition ${aktif
+                            ? "bg-white border-blue-500 ring-2 ring-blue-200"
+                            : "bg-white border-gray-300 hover:bg-gray-50 hover:border-blue-300"
+                            }`}
                         >
                           <div
-                            className={`flex-shrink-0 w-8 h-8 rounded-md flex items-center justify-center text-sm font-semibold ${
-                              aktif
-                                ? "bg-blue-600 text-white"
-                                : "bg-gray-100 text-gray-700 border border-gray-300"
-                            }`}
+                            className={`flex-shrink-0 w-8 h-8 rounded-md flex items-center justify-center text-sm font-semibold ${aktif
+                              ? "bg-blue-600 text-white"
+                              : "bg-gray-100 text-gray-700 border border-gray-300"
+                              }`}
                           >
                             {labelHuruf}
                           </div>
@@ -982,9 +1221,8 @@ const PartSoal = () => {
                             {pil.text || "(kosong)"}
                           </div>
                           <div
-                            className={`text-lg ${
-                              aktif ? "text-blue-600" : "text-gray-400"
-                            }`}
+                            className={`text-lg ${aktif ? "text-blue-600" : "text-gray-400"
+                              }`}
                           >
                             {aktif ? <FaCheckCircle /> : <FaRegCircle />}
                           </div>
@@ -997,21 +1235,176 @@ const PartSoal = () => {
                 {/* Esai / Teks Singkat */}
                 {(soalAktif?.tipeSoal === "esay" ||
                   soalAktif?.tipeSoal === "teksSingkat") && (
-                  <div className="mt-6">
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Jawaban Anda
-                    </label>
-                    <textarea
-                      className="w-full min-h-[160px] bg-white border border-gray-300 rounded-lg p-4 text-gray-800 text-[15px] leading-relaxed focus:outline-none focus:ring-2 focus:ring-blue-400/40 focus:border-blue-400"
-                      value={jawabanUser[soalAktif.id] || ""}
-                      onChange={(e) => handleJawabEsai(e.target.value)}
-                      placeholder="Ketik jawaban Anda di sini..."
-                    />
-                    {soalAktif?.tipeSoal === "teksSingkat" && (
-                      <p className="text-xs text-gray-500 mt-1"></p>
-                    )}
-                  </div>
-                )}
+                    <div className="mt-6">
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        Jawaban Anda
+                      </label>
+                      <textarea
+                        className="w-full min-h-[160px] bg-white border border-gray-300 rounded-lg p-4 text-gray-800 text-[15px] leading-relaxed focus:outline-none focus:ring-2 focus:ring-blue-400/40 focus:border-blue-400"
+                        value={jawabanUser[soalAktif.id] || ""}
+                        onChange={(e) => handleJawabEsai(e.target.value)}
+                        placeholder="Ketik jawaban Anda di sini..."
+                      />
+                      {soalAktif?.tipeSoal === "teksSingkat" && (
+                        <p className="text-xs text-gray-500 mt-1"></p>
+                      )}
+                    </div>
+                  )}
+
+                {/* --- UPDATE: SOAL DOKUMEN dengan Instruksi Validasi --- */}
+                {soalAktif?.tipeSoal === "soalDokumen" && (() => {
+                  const soalId = soalAktif.id;
+                  const files = dokumenFiles[soalId] || [];
+
+                  // Ambil Config untuk ditampilkan di UI
+                  const config = soalAktif.fileConfig || {};
+                  const allowedTypes = Array.isArray(config.allowedTypes) ? config.allowedTypes : [];
+                  const maxSizeMB = parseFloat(config.maxSize) || 5;
+                  const maxCount = parseInt(config.maxCount) || 1;
+                  
+                  // String untuk input accept
+                  const acceptString = allowedTypes.length > 0 ? allowedTypes.join(",") : ".pdf,.doc,.docx,.ppt,.pptx,.xls,.xlsx,image/*";
+
+                  const isMaxReached = files.length >= maxCount;
+
+                  const onBrowseClick = () => {
+                      if (!isMaxReached) dokumenInputRef.current?.click();
+                  };
+
+                  const onDragOver = (e) => {
+                    e.preventDefault();
+                    if (!isMaxReached) setIsDragOver(true);
+                  };
+                  const onDragLeave = (e) => {
+                    e.preventDefault();
+                    setIsDragOver(false);
+                  };
+                  const onDrop = (e) => {
+                    e.preventDefault();
+                    setIsDragOver(false);
+                    if (!isMaxReached) handleTambahDokumen(e.dataTransfer.files);
+                  };
+
+                  return (
+                    <div className="mt-6">
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        Upload Jawaban (Dokumen)
+                      </label>
+
+                      {/* Info Validasi */}
+                      <div className="bg-blue-50 text-blue-800 text-xs px-3 py-2 rounded mb-3 border border-blue-100 flex flex-col gap-1">
+                          <p><strong>Ketentuan File:</strong></p>
+                          <ul className="list-disc pl-4 space-y-0.5">
+                              <li>Format: {allowedTypes.length > 0 ? allowedTypes.join(", ") : "Semua jenis dokumen"}</li>
+                              <li>Ukuran Maksimal: {maxSizeMB} MB per file</li>
+                              <li>Jumlah Maksimal: {maxCount} file</li>
+                          </ul>
+                      </div>
+
+                      {/* Drop Zone */}
+                      <div
+                        onDragOver={onDragOver}
+                        onDragLeave={onDragLeave}
+                        onDrop={onDrop}
+                        onClick={onBrowseClick}
+                        className={`w-full rounded-lg border-2 border-dashed p-6 text-center transition
+                          ${isMaxReached 
+                            ? "border-gray-200 bg-gray-100 cursor-not-allowed opacity-60" 
+                            : isDragOver
+                                ? "border-blue-500 bg-blue-50 cursor-pointer"
+                                : "border-gray-300 bg-white hover:bg-gray-50 cursor-pointer"
+                          }`}
+                      >
+                        {isMaxReached ? (
+                             <p className="text-sm text-gray-500 font-medium">
+                                Jumlah file sudah maksimal ({maxCount} file).
+                                <br/>Hapus file untuk mengunggah yang baru.
+                             </p>
+                        ) : (
+                            <>
+                                <p className="text-sm text-gray-700 font-medium">
+                                Drag & drop file di sini, atau klik untuk pilih file
+                                </p>
+                                <p className="text-xs text-gray-500 mt-1">
+                                Klik untuk mencari file
+                                </p>
+                            </>
+                        )}
+                      </div>
+
+                      {/* Hidden input */}
+                      <input
+                        ref={dokumenInputRef}
+                        type="file"
+                        multiple={maxCount > 1}
+                        accept={acceptString}
+                        onChange={(e) => {
+                          handleTambahDokumen(e.target.files);
+                          e.target.value = null; // reset value
+                        }}
+                        className="hidden"
+                        disabled={isMaxReached}
+                      />
+
+                      {/* List file */}
+                      {files.length > 0 && (
+                        <div className="mt-4 space-y-2">
+                          <div className="flex items-center justify-between mb-2">
+                            <p className="text-xs text-gray-600">
+                              {files.length} / {maxCount} file dipilih
+                            </p>
+                            <button
+                              onClick={() => handleHapusSemuaDokumen(soalId)}
+                              className="text-xs text-red-600 hover:underline"
+                              type="button"
+                            >
+                              Hapus semua
+                            </button>
+                          </div>
+
+                          {files.map((f, idx) => (
+                            <div
+                              key={`${f.name}-${idx}`}
+                              className="flex items-center justify-between bg-gray-50 border border-gray-200 rounded-md px-3 py-2"
+                            >
+                              <div className="flex items-center min-w-0 gap-2">
+                                <FaFileAlt className="text-blue-500" />
+                                <div className="min-w-0">
+                                    <a 
+                                        href={`${API_URL}${f.path}`} 
+                                        target="_blank" 
+                                        rel="noopener noreferrer"
+                                        className="text-sm text-blue-600 hover:underline truncate block"
+                                    >
+                                        {f.name}
+                                    </a>
+                                </div>
+                              </div>
+
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleHapusDokumen(soalId, idx);
+                                }}
+                                className="text-xs ml-2 px-2 py-1 rounded bg-red-50 text-red-600 hover:bg-red-100 border border-red-200"
+                                type="button"
+                              >
+                                <FaTrash />
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                      {files.length === 0 && (
+                        <p className="text-xs text-gray-500 mt-2">
+                          Belum ada file dipilih.
+                        </p>
+                      )}
+                    </div>
+                  );
+                })()}
+
               </div>
             </div>
           </main>
@@ -1025,6 +1418,7 @@ const PartSoal = () => {
               timerDisplay={timerDisplay}
               soalList={soalList}
               jawabanUser={jawabanUser}
+              dokumenFiles={dokumenFiles}
               raguRagu={raguRagu}
               currentIndex={currentIndex}
               onNavClick={gotoNomor}

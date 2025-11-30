@@ -1,3 +1,4 @@
+// File: src/page/EditSoal.jsx
 import React, { useEffect, useState } from "react";
 import { useParams, useNavigate, useLocation } from "react-router-dom";
 import {
@@ -10,30 +11,21 @@ import {
   FaListAlt,
   FaImage,
   FaCheckCircle,
-  FaFileExcel, // NEW
+  FaFileExcel,
+  FaSpinner, // Import icon loading/spinner
 } from "react-icons/fa";
-import * as XLSX from "xlsx"; // NEW
+
+// --- UPDATE: Import helper dari TemplateExcel ---
+import { generateWorkbookFromState, downloadWorkbook } from "../admin/TemplateExcel";
+// Pastikan path "../admin/TemplateExcel" sesuai dengan struktur folder Anda.
 
 const API_URL = "http://localhost:5000";
-
-// ---------- Excel Helpers (NEW) ----------
-const downloadWorkbook = (wb, filename = "export_ujian_dan_soal.xlsx") => {
-  const wbout = XLSX.write(wb, { bookType: "xlsx", type: "array" });
-  const blob = new Blob([wbout], { type: "application/octet-stream" });
-  const url = window.URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename;
-  a.click();
-  window.URL.revokeObjectURL(url);
-};
 
 const EditSoal = () => {
   const { id } = useParams();
   const navigate = useNavigate();
 
   const location = useLocation();
-  // Cek apakah ada sinyal 'fromSuperAdmin' yang dikirim dari TabUjianAdmin
   const isFromSuperAdmin = location.state?.fromSuperAdmin === true;
 
   const [loading, setLoading] = useState(true);
@@ -45,13 +37,13 @@ const EditSoal = () => {
   const [durasi, setDurasi] = useState("");
 
   const [acakSoal, setAcakSoal] = useState(false);
-  const [acakOpsi, setAcakOpsi] = useState(false); // NEW
+  const [acakOpsi, setAcakOpsi] = useState(false);
 
   const [daftarSoal, setDaftarSoal] = useState([]);
   const [successMessage, setSuccessMessage] = useState("");
 
   // =======================================================
-  // ▼▼▼ FETCH DATA UJIAN (DIPERBARUI) ▼▼▼
+  // ▼▼▼ FETCH DATA UJIAN ▼▼▼
   // =======================================================
   useEffect(() => {
     const fetchDetail = async () => {
@@ -67,19 +59,17 @@ const EditSoal = () => {
 
         setKeterangan(data.keterangan || "");
 
-        // Set Tanggal Mulai
         const localDate = data.tanggal
           ? new Date(data.tanggal).toLocaleDateString("en-CA", {
-              timeZone: "Asia/Jakarta",
-            })
+            timeZone: "Asia/Jakarta",
+          })
           : "";
         setTanggal(localDate);
 
-        // Set Tanggal Berakhir
         const localDateBerakhir = data.tanggal_berakhir
           ? new Date(data.tanggal_berakhir).toLocaleDateString("en-CA", {
-              timeZone: "Asia/Jakarta",
-            })
+            timeZone: "Asia/Jakarta",
+          })
           : "";
         setTanggalBerakhir(localDateBerakhir);
 
@@ -88,22 +78,29 @@ const EditSoal = () => {
         setDurasi(data.durasi || "");
 
         setAcakSoal(data.acak_soal || false);
-        setAcakOpsi(data.acak_opsi || false); // NEW
+        setAcakOpsi(data.acak_opsi || false);
 
-        // [PERBAIKAN] Simpan ID asli dari database
         setDaftarSoal(
           (data.soalList || []).map((s) => ({
             id: s.id,
+            bobot: s.bobot || 1,
             tipeSoal: s.tipeSoal,
             soalText: s.soalText,
             gambar: s.gambar || null,
             gambarPreview: s.gambar ? `${API_URL}/api/ujian${s.gambar}` : null,
+
+            // --- MAP DATA CONFIG ---
+            allowedTypes: s.allowedTypes || [],
+            maxSize: s.maxSize || 5,
+            maxCount: s.maxCount || 1,
+            // -----------------------
+
             pilihan:
               s.tipeSoal === "pilihanGanda"
                 ? (s.pilihan || []).map((p) => ({
-                    id: p.id,
-                    text: p.text,
-                  }))
+                  id: p.id,
+                  text: p.text,
+                }))
                 : [],
             kunciJawaban:
               s.tipeSoal === "pilihanGanda"
@@ -123,92 +120,26 @@ const EditSoal = () => {
     };
     fetchDetail();
   }, [id]);
-  // =======================================================
-  // ▲▲▲ AKHIR FETCH DATA ▲▲▲
-  // =======================================================
 
-  // ---------- EXPORT UJIAN + SOAL (NEW) ----------
+  // =======================================================
+  // ▼▼▼ EXPORT UJIAN (UPDATE SKEMA BARU) ▼▼▼
+  // =======================================================
   const handleExportUjianSoalExcel = () => {
-  const settingHeaders = [
-    "keterangan",
-    "tanggalMulai",
-    "tanggalBerakhir",
-    "jamMulai",
-    "jamBerakhir",
-    "durasiMenit",
-    "acakSoal",
-    "acakOpsi",
-  ];
-
-  const settingRow = [
-    {
-      keterangan: keterangan || "",
-      tanggalMulai: tanggal || "",
-      tanggalBerakhir: tanggalBerakhir || "",
-      jamMulai: jamMulai || "",
-      jamBerakhir: jamBerakhir || "",
-      durasiMenit: durasi || "",
-      acakSoal: acakSoal ? "TRUE" : "FALSE",
-      acakOpsi: acakOpsi ? "TRUE" : "FALSE",
-    },
-  ];
-
-  const wsSetting = XLSX.utils.json_to_sheet(settingRow, {
-    header: settingHeaders,
-  });
-  XLSX.utils.sheet_add_aoa(wsSetting, [settingHeaders], { origin: "A1" });
-
-  const soalHeaders = [
-    "tipeSoal",
-    "soalText",
-    "pilihan1",
-    "pilihan2",
-    "pilihan3",
-    "pilihan4",
-    "pilihan5",
-    "kunciJawaban",
-    "gambarUrl",
-  ];
-
-  const soalRows = daftarSoal.map((s) => {
-    const pilihanTexts =
-      s.tipeSoal === "pilihanGanda" ? s.pilihan.map((p) => p.text) : [];
-
-    // ✅ ubah ID kunci → index pilihan (1..n)
-    let kunciIndex = "";
-    if (s.tipeSoal === "pilihanGanda") {
-      const idx = (s.pilihan || []).findIndex((p) => p.id === s.kunciJawaban);
-      kunciIndex = String(idx >= 0 ? idx + 1 : 1);
-    }
-
-    return {
-      tipeSoal: s.tipeSoal,
-      soalText: s.soalText,
-      pilihan1: pilihanTexts[0] || "",
-      pilihan2: pilihanTexts[1] || "",
-      pilihan3: pilihanTexts[2] || "",
-      pilihan4: pilihanTexts[3] || "",
-      pilihan5: pilihanTexts[4] || "",
-      kunciJawaban:
-        s.tipeSoal === "pilihanGanda"
-          ? kunciIndex
-          : s.tipeSoal === "teksSingkat"
-          ? s.kunciJawabanText || ""
-          : "",
-      gambarUrl: s.gambarPreview || "",
+    const dataToExport = {
+      keterangan,
+      tanggal,
+      tanggalBerakhir,
+      jamMulai,
+      jamBerakhir,
+      durasi,
+      acakSoal,
+      acakOpsi,
+      daftarSoal,
     };
-  });
 
-  const wsSoal = XLSX.utils.json_to_sheet(soalRows, { header: soalHeaders });
-  XLSX.utils.sheet_add_aoa(wsSoal, [soalHeaders], { origin: "A1" });
-
-  const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, wsSetting, "PENGATURAN_UJIAN");
-  XLSX.utils.book_append_sheet(wb, wsSoal, "TEMPLATE_SOAL");
-
-  downloadWorkbook(wb, `export_ujian_${id}.xlsx`);
-};
-
+    const wb = generateWorkbookFromState(dataToExport);
+    downloadWorkbook(wb, `export_ujian_${id}.xlsx`);
+  };
 
   // === HANDLER GAMBAR ===
   const handleFileChange = (soalId, file) => {
@@ -244,6 +175,7 @@ const EditSoal = () => {
       {
         id: newId,
         tipeSoal: "pilihanGanda",
+        bobot: 1,
         soalText: "",
         gambar: null,
         gambarPreview: null,
@@ -253,6 +185,10 @@ const EditSoal = () => {
         ],
         kunciJawaban: newPilId1,
         kunciJawabanText: "",
+        // Default config
+        allowedTypes: [],
+        maxSize: 5,
+        maxCount: 1,
       },
     ]);
   };
@@ -272,17 +208,33 @@ const EditSoal = () => {
     setDaftarSoal(updated);
   };
 
+  const handleAllowedTypeChange = (soalId, type) => {
+    setDaftarSoal((prev) =>
+      prev.map((s) => {
+        if (s.id === soalId) {
+          const currentTypes = s.allowedTypes || [];
+          if (currentTypes.includes(type)) {
+            return { ...s, allowedTypes: currentTypes.filter((t) => t !== type) };
+          } else {
+            return { ...s, allowedTypes: [...currentTypes, type] };
+          }
+        }
+        return s;
+      })
+    );
+  };
+
   const handleTambahPilihan = (soalId) => {
     setDaftarSoal((prev) =>
       prev.map((s) =>
         s.id === soalId
           ? {
-              ...s,
-              pilihan: [
-                ...s.pilihan,
-                { id: `new_pil_${Date.now()}`, text: "" },
-              ],
-            }
+            ...s,
+            pilihan: [
+              ...s.pilihan,
+              { id: `new_pil_${Date.now()}`, text: "" },
+            ],
+          }
           : s
       )
     );
@@ -316,11 +268,11 @@ const EditSoal = () => {
       prev.map((s) =>
         s.id === soalId
           ? {
-              ...s,
-              pilihan: s.pilihan.map((p) =>
-                p.id === pilihanId ? { ...p, text } : p
-              ),
-            }
+            ...s,
+            pilihan: s.pilihan.map((p) =>
+              p.id === pilihanId ? { ...p, text } : p
+            ),
+          }
           : s
       )
     );
@@ -335,12 +287,11 @@ const EditSoal = () => {
   };
 
   // =======================================================
-  // ▼▼▼ SIMPAN PERUBAHAN (DIPERBARUI) ▼▼▼
+  // ▼▼▼ SIMPAN PERUBAHAN ▼▼▼
   // =======================================================
   const handleSubmit = async (e) => {
     e.preventDefault();
 
-    // Validasi
     if (!jamMulai || !jamBerakhir) {
       alert("Jam mulai dan jam berakhir wajib diisi.");
       return;
@@ -356,6 +307,7 @@ const EditSoal = () => {
 
     const soalList = daftarSoal.map((s) => ({
       id: s.id,
+      bobot: s.bobot,
       tipeSoal: s.tipeSoal,
       soalText: s.soalText,
       gambar: s.gambarPreview?.includes("/uploads/")
@@ -366,8 +318,13 @@ const EditSoal = () => {
         s.tipeSoal === "pilihanGanda"
           ? s.pilihan.find((p) => p.id === s.kunciJawaban)?.text || ""
           : s.tipeSoal === "teksSingkat"
-          ? s.kunciJawabanText || ""
-          : "",
+            ? s.kunciJawabanText || ""
+            : "",
+
+      // Kirim Config
+      allowedTypes: s.tipeSoal === "soalDokumen" ? s.allowedTypes : [],
+      maxSize: s.tipeSoal === "soalDokumen" ? s.maxSize : 0,
+      maxCount: s.tipeSoal === "soalDokumen" ? s.maxCount : 0,
     }));
 
     const formData = new FormData();
@@ -381,7 +338,7 @@ const EditSoal = () => {
         jamBerakhir,
         durasi,
         acakSoal,
-        acakOpsi, // NEW
+        acakOpsi,
         soalList,
       })
     );
@@ -405,7 +362,7 @@ const EditSoal = () => {
       const json = await res.json();
       if (!res.ok) throw new Error(json.message || "Gagal menyimpan perubahan");
 
-      setSuccessMessage("Ujian berhasil diperbarui!");
+      setSuccessMessage("Ujian berhasil diperbarui! Mengalihkan...");
 
       setTimeout(() => {
         if (isFromSuperAdmin) {
@@ -418,18 +375,17 @@ const EditSoal = () => {
       alert("Terjadi kesalahan: " + err.message);
     }
   };
-  // =======================================================
-  // ▲▲▲ AKHIR SIMPAN PERUBAHAN ▲▲▲
-  // =======================================================
 
   if (loading)
     return (
-      <p className="p-10 text-center text-gray-600">
-        Memuat data ujian untuk diedit...
-      </p>
+      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+        <div className="flex flex-col items-center gap-3">
+          <FaSpinner className="text-blue-600 text-3xl animate-spin" />
+          <p className="text-gray-600 font-medium">Memuat data ujian...</p>
+        </div>
+      </div>
     );
 
-  // === STYLE ===
   const labelClass =
     "block text-sm font-semibold text-gray-700 mb-1 tracking-wide";
   const inputClass =
@@ -440,60 +396,120 @@ const EditSoal = () => {
     "bg-white rounded-xl border border-gray-100 shadow-sm p-6 transition duration-200";
 
   return (
-    <div className="bg-gray-50 min-h-screen flex flex-col">
-      {/* TOAST SUKSES */}
+    <div className="bg-gray-50 min-h-screen flex flex-col pb-10">
+
+      {/* =======================================================
+          ▼▼▼ NOTIFIKASI SUKSES (RESPONSIVE + SPINNER) ▼▼▼
+      ======================================================= */}
       {successMessage && (
-        <div className="fixed top-20 left-1/2 -translate-x-1/2 z-40">
-          <div className="flex items-center gap-3 bg-green-600 text-white px-5 py-3 rounded-lg shadow-lg">
-            <FaCheckCircle className="text-white w-5 h-5" />
-            <span className="font-semibold text-base">{successMessage}</span>
+        <div className="fixed top-24 left-1/2 -translate-x-1/2 z-[100] w-[90%] md:w-full max-w-lg px-2 sm:px-4 transition-all duration-300">
+          <div className="flex items-center justify-between gap-4 bg-green-600 text-white px-5 py-4 rounded-xl shadow-2xl animate-bounce-in border border-green-500 backdrop-blur-sm bg-opacity-95">
+            <div className="flex items-center gap-3 overflow-hidden">
+              <FaCheckCircle className="text-white w-6 h-6 flex-shrink-0" />
+              <span className="font-semibold text-sm md:text-base truncate">
+                {successMessage}
+              </span>
+            </div>
+            {/* ICON MUTER / SPINNER */}
+            <div className="flex items-center gap-2 pl-2 border-l border-green-400/50">
+              <FaSpinner className="w-5 h-5 text-white animate-spin flex-shrink-0" />
+            </div>
           </div>
         </div>
       )}
 
-      {/* HEADER */}
-      <div className="bg-white shadow-md border-b border-gray-300 px-8 py-4 flex justify-between items-center sticky top-0 z-50">
-        <h2 className="text-xl font-semibold text-gray-900 flex items-center gap-2">
-          🧩 Edit Ujian
+      {/* ===========================
+          NAVBAR (Sticky Top)
+      ============================ */}
+      <div className="bg-white shadow-sm border-b border-gray-300 py-4 pl-14 pr-4 md:px-8 md:py-5 sticky top-0 z-50 flex justify-between items-center transition-all">
+        <h2 className="text-xl md:text-2xl font-semibold text-gray-900 flex items-center gap-2">
+          {/* Ikon Puzzle disembunyikan di mobile */}
+          <span className="hidden md:inline-block text-blue-600 text-2xl">
+            🧩
+          </span>
+          <span>Edit Ujian</span>
         </h2>
 
-        <div className="flex gap-3">
-          {/* NEW: Export button */}
+        {/* TOMBOL AKSI - HANYA TAMPIL DI DESKTOP/TABLET (md ke atas) */}
+        <div className="hidden md:flex gap-2 items-center">
           <button
             type="button"
             onClick={handleExportUjianSoalExcel}
-            className="flex items-center gap-2 px-4 py-2 rounded-md bg-indigo-600 text-white font-semibold shadow hover:bg-indigo-700 transition"
+            className="flex items-center gap-2 px-3 lg:px-4 py-2 rounded-md bg-indigo-600 text-white font-semibold shadow hover:bg-indigo-700 transition text-xs lg:text-sm"
           >
-            <FaFileExcel className="w-4 h-4" />
-            Export Ujian
+            <FaFileExcel />
+            <span className="hidden lg:inline">Export</span> Ujian
           </button>
 
           <button
             onClick={() => {
-              if (isFromSuperAdmin) {
-                navigate(-1);
-              } else {
-                navigate("/admin/daftar-soal");
-              }
+              if (isFromSuperAdmin) navigate(-1);
+              else navigate("/admin/daftar-soal");
             }}
-            className="flex items-center gap-2 px-4 py-2 rounded-md bg-gray-300 text-gray-800 font-semibold shadow hover:bg-gray-400 transition"
+            className="flex items-center gap-2 px-3 lg:px-4 py-2 rounded-md bg-gray-100 text-gray-700 font-semibold border border-gray-300 hover:bg-gray-200 transition text-xs lg:text-sm"
           >
             Batal
           </button>
 
           <button
-            onClick={handleSubmit}
-            className="flex items-center gap-2 px-4 py-2 rounded-md bg-blue-600 text-white font-semibold shadow hover:bg-blue-700 transition"
+            type="submit"
+            form="form-edit-soal"
+            className="flex items-center gap-2 px-4 lg:px-5 py-2 rounded-md bg-blue-600 text-white font-semibold shadow hover:bg-blue-700 transition text-xs lg:text-sm"
           >
-            <FaSave className="w-4 h-4" />
+            <FaSave />
             Simpan Perubahan
           </button>
         </div>
       </div>
 
-      {/* FORM */}
-      <div className="p-6 md:p-10 overflow-y-auto">
-        <form onSubmit={handleSubmit} className="space-y-8 max-w-5xl mx-auto">
+      {/* ===========================
+          KONTEN UTAMA
+      ============================ */}
+      <div className="p-4 md:p-10 overflow-y-auto">
+
+        {/* MENU AKSI MOBILE (Hanya tampil di layar HP < md) */}
+        <div className="md:hidden mb-6 bg-white rounded-xl border border-gray-200 shadow-sm p-4">
+          <h3 className="text-sm font-semibold text-gray-700 mb-3 border-b border-gray-100 pb-2">
+            Menu Aksi Cepat
+          </h3>
+          <div className="grid grid-cols-2 gap-3">
+            <button
+              type="button"
+              onClick={handleExportUjianSoalExcel}
+              className="flex flex-col items-center justify-center gap-1 py-3 px-2 rounded-lg bg-indigo-50 text-indigo-700 font-medium hover:bg-indigo-100 transition text-xs border border-indigo-100"
+            >
+              <FaFileExcel className="w-5 h-5 mb-1" />
+              Export Ujian
+            </button>
+
+            <button
+              onClick={() => {
+                if (isFromSuperAdmin) navigate(-1);
+                else navigate("/admin/daftar-soal");
+              }}
+              className="flex flex-col items-center justify-center gap-1 py-3 px-2 rounded-lg bg-gray-50 text-gray-600 font-medium hover:bg-gray-100 transition text-xs border border-gray-200"
+            >
+              <span className="text-lg font-bold">✕</span>
+              Batal
+            </button>
+
+            <button
+              type="submit"
+              form="form-edit-soal"
+              className="col-span-2 flex flex-col items-center justify-center gap-1 py-3 px-2 rounded-lg bg-blue-600 text-white font-medium shadow hover:bg-blue-700 transition text-xs"
+            >
+              <FaSave className="w-5 h-5 mb-1" />
+              Simpan Perubahan
+            </button>
+          </div>
+        </div>
+
+        {/* FORM EDIT */}
+        <form
+          id="form-edit-soal"
+          onSubmit={handleSubmit}
+          className="space-y-8 max-w-5xl mx-auto"
+        >
           {/* Pengaturan Ujian */}
           <fieldset className={fieldsetClass}>
             <div className="flex items-center gap-2 mb-5 border-b pb-2 border-gray-200">
@@ -515,7 +531,6 @@ const EditSoal = () => {
                 />
               </div>
 
-              {/* JENDELA AKSES (TANGGAL) */}
               <div className="relative">
                 <label className={labelClass}>
                   Tanggal Mulai (Akses Dibuka)
@@ -548,7 +563,6 @@ const EditSoal = () => {
                 />
               </div>
 
-              {/* JENDELA AKSES (JAM) */}
               <div className="relative">
                 <label className={labelClass}>Jam Mulai (Akses Dibuka)</label>
                 <div className="absolute inset-y-0 left-3 flex items-center pt-6 z-10">
@@ -579,7 +593,6 @@ const EditSoal = () => {
                 />
               </div>
 
-              {/* FIELD DURASI */}
               <div className="md:col-span-2">
                 <label className={labelClass}>Durasi Pengerjaan (Menit)</label>
                 <input
@@ -592,13 +605,12 @@ const EditSoal = () => {
                   required
                 />
                 <p className="text-xs text-gray-500 mt-1">
-                  Ini adalah waktu hitung mundur yang akan didapat peserta setelah
-                  menekan tombol "Mulai".
+                  Ini adalah waktu hitung mundur yang akan didapat peserta
+                  setelah menekan tombol "Mulai".
                 </p>
               </div>
             </div>
 
-            {/* Checkbox Acak */}
             <div className="mt-4 space-y-2">
               <div className="flex flex-col gap-3">
                 <label className="inline-flex items-center gap-2 text-sm text-gray-700">
@@ -653,7 +665,6 @@ const EditSoal = () => {
                 <input
                   type="file"
                   accept="image/*"
-                  value=""
                   onChange={(e) => handleFileChange(soal.id, e.target.files[0])}
                   className="block text-sm border border-gray-300 rounded-md p-1 w-full"
                 />
@@ -675,7 +686,7 @@ const EditSoal = () => {
                 )}
               </div>
 
-              {/* Pertanyaan */}
+              {/* GRID SOAL & BOBOT */}
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div>
                   <label className={labelClass}>Tipe Soal</label>
@@ -687,12 +698,31 @@ const EditSoal = () => {
                     className={inputClass}
                   >
                     <option value="pilihanGanda">Pilihan Ganda</option>
-                    <option value="teksSingkat">Teks Singkat (Auto-Nilai)</option>
+                    <option value="teksSingkat">
+                      Teks Singkat (Auto-Nilai)
+                    </option>
+                    <option value="soalDokumen">
+                      Soal Dokumen (Jawaban Upload File)
+                    </option>
                     <option value="esay">Esai (Nilai Manual)</option>
                   </select>
                 </div>
 
-                <div className="md:col-span-2">
+                <div>
+                  <label className={labelClass}>Bobot Nilai</label>
+                  <input
+                    type="number"
+                    min="0"
+                    value={soal.bobot || 1}
+                    onChange={(e) =>
+                      handleSoalChange(soal.id, "bobot", e.target.value)
+                    }
+                    className={inputClass}
+                    placeholder="Default: 1"
+                  />
+                </div>
+
+                <div className="md:col-span-3">
                   <label className={labelClass}>Pertanyaan</label>
                   <textarea
                     value={soal.soalText}
@@ -704,6 +734,99 @@ const EditSoal = () => {
                   />
                 </div>
               </div>
+
+              {/* UI KONFIGURASI SOAL DOKUMEN */}
+              {soal.tipeSoal === "soalDokumen" && (
+                <div className="bg-purple-50 border-l-4 border-purple-400 p-4 rounded-r-md mt-4 space-y-4">
+                  <div className="flex mb-2">
+                    <FaCheckCircle className="h-5 w-5 text-purple-400 mt-0.5" />
+                    <p className="ml-3 text-sm text-purple-700 font-semibold">
+                      Konfigurasi Upload Dokumen Peserta
+                    </p>
+                  </div>
+
+                  {/* 1. PILIH TIPE FILE */}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Tipe File yang Diizinkan:
+                    </label>
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                      {[
+                        { label: "PDF (.pdf)", val: ".pdf" },
+                        { label: "Word (.doc, .docx)", val: ".doc,.docx" },
+                        { label: "Excel (.xls, .xlsx)", val: ".xls,.xlsx" },
+                        { label: "Gambar (JPG/PNG)", val: ".jpg,.jpeg,.png" },
+                        { label: "ZIP/RAR", val: ".zip,.rar" },
+                      ].map((type) => (
+                        <label
+                          key={type.val}
+                          className="flex items-center space-x-2 text-sm bg-white p-2 rounded border border-gray-200"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={(soal.allowedTypes || []).includes(
+                              type.val
+                            )}
+                            onChange={() =>
+                              handleAllowedTypeChange(soal.id, type.val)
+                            }
+                            className="rounded text-purple-600 focus:ring-purple-500"
+                          />
+                          <span>{type.label}</span>
+                        </label>
+                      ))}
+                    </div>
+                    {(soal.allowedTypes || []).length === 0 && (
+                      <p className="text-xs text-orange-600 mt-1">
+                        * Jika tidak ada yang dipilih, semua jenis file akan
+                        diizinkan (Tidak disarankan).
+                      </p>
+                    )}
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {/* 2. MAX SIZE */}
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Maksimal Ukuran File (MB)
+                      </label>
+                      <input
+                        type="number"
+                        min="1"
+                        max="20"
+                        value={soal.maxSize || 5}
+                        onChange={(e) =>
+                          handleSoalChange(soal.id, "maxSize", e.target.value)
+                        }
+                        className={inputClass}
+                      />
+                      <p className="text-xs text-gray-500">
+                        Contoh: 5 untuk 5 MB.
+                      </p>
+                    </div>
+
+                    {/* 3. MAX JUMLAH FILE */}
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Maksimal Jumlah File Upload
+                      </label>
+                      <input
+                        type="number"
+                        min="1"
+                        max="10"
+                        value={soal.maxCount || 1}
+                        onChange={(e) =>
+                          handleSoalChange(soal.id, "maxCount", e.target.value)
+                        }
+                        className={inputClass}
+                      />
+                      <p className="text-xs text-gray-500">
+                        Berapa file yang boleh diupload peserta untuk soal ini.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
 
               {/* Pilihan */}
               {soal.tipeSoal === "pilihanGanda" && (
@@ -723,7 +846,9 @@ const EditSoal = () => {
                       <input
                         type="radio"
                         checked={soal.kunciJawaban === p.id}
-                        onChange={() => handleKunciJawabanChange(soal.id, p.id)}
+                        onChange={() =>
+                          handleKunciJawabanChange(soal.id, p.id)
+                        }
                         className="h-4 w-4 text-blue-600"
                       />
                       <input
@@ -778,8 +903,8 @@ const EditSoal = () => {
                     required
                   />
                   <p className="text-xs text-gray-500 mt-1">
-                    Gunakan tanda <b>,</b> (tanda koma) untuk memisahkan jika ada
-                    lebih dari satu jawaban benar.
+                    Gunakan tanda <b>,</b> (tanda koma) untuk memisahkan jika
+                    ada lebih dari satu jawaban benar.
                     <br />
                     Contoh: <b>2 , dua , 2 (dua)</b>
                   </p>

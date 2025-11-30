@@ -1,31 +1,25 @@
 // File: src/admin/TambahAdmin.jsx
-import React, { useState, useEffect, useCallback, useMemo } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import {
   FaUserPlus,
   FaUser,
   FaEnvelope,
   FaKey,
   FaSpinner,
-  FaCheckCircle,
-  FaExclamationTriangle,
-  FaTimes,
-  FaSearch,
   FaEye,
   FaEyeSlash,
   FaShieldAlt,
-  FaSort,
-  FaSortUp,
-  FaSortDown,
-  FaClipboardList,
   FaUserShield,
-  FaSave,
-  FaTrash,
+  FaCheckCircle,
+  FaExclamationTriangle,
+  FaTimes,
 } from "react-icons/fa";
 import { jwtDecode } from "jwt-decode";
+import DaftarAdmin from "./DaftarAdmin"; 
 
 const API_URL = "http://localhost:5000";
 
-/** Komponen notifikasi (success / error) */
+/** Komponen notifikasi di Parent (untuk form) */
 const MemoizedMessage = ({ type, text, onDismiss }) => {
   if (!text) return null;
   const isSuccess = type === "success";
@@ -35,40 +29,24 @@ const MemoizedMessage = ({ type, text, onDismiss }) => {
   const Icon = isSuccess ? FaCheckCircle : FaExclamationTriangle;
 
   return (
-    <div
-      className={`flex items-start p-3 mb-4 text-sm border rounded-xl ${bgColor} ${textColor} ${borderColor}`}
-      role="alert"
-    >
+    <div className={`flex items-start p-3 mb-4 text-sm border rounded-xl ${bgColor} ${textColor} ${borderColor}`}>
       <Icon className="w-5 h-5 mt-0.5 mr-3 flex-shrink-0" />
-      <div className="flex-1">
-        <span className="font-medium">{text}</span>
-      </div>
-      <button
-        type="button"
-        className={`ml-3 ${textColor} rounded-lg p-1.5 inline-flex items-center justify-center h-8 w-8 hover:bg-black/5`}
-        onClick={onDismiss}
-        aria-label="Tutup notifikasi"
-        title="Tutup"
-      >
+      <div className="flex-1"><span className="font-medium">{text}</span></div>
+      <button type="button" className={`ml-3 ${textColor} rounded-lg p-1.5 inline-flex items-center justify-center h-8 w-8 hover:bg-black/5`} onClick={onDismiss}>
         <FaTimes />
       </button>
     </div>
   );
 };
 
+// --- Helper Functions ---
 const strengthLabel = (s) => {
   switch (s) {
-    case 0:
-    case 1:
-      return "Sangat lemah";
-    case 2:
-      return "Lemah";
-    case 3:
-      return "Cukup";
-    case 4:
-      return "Kuat";
-    default:
-      return "-";
+    case 0: case 1: return "Sangat lemah";
+    case 2: return "Lemah";
+    case 3: return "Cukup";
+    case 4: return "Kuat";
+    default: return "-";
   }
 };
 
@@ -81,46 +59,10 @@ const calcStrength = (pw) => {
   return s;
 };
 
-const formatTanggal = (iso) => {
-  if (!iso) return "-";
-  try {
-    const d = new Date(iso);
-    return d.toLocaleString("id-ID", {
-      timeZone: "Asia/Jakarta",
-      day: "2-digit",
-      month: "short",
-      year: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-    });
-  } catch {
-    return iso;
-  }
-};
-
-const RoleBadge = ({ role }) => {
-  const c =
-    role === "superadmin"
-      ? "bg-indigo-100 text-indigo-700 border-indigo-200"
-      : "bg-emerald-100 text-emerald-700 border-emerald-200";
-  return (
-    <span className={`px-2.5 py-1 rounded-full text-xs border ${c} capitalize`}>
-      {role || "admin"}
-    </span>
-  );
-};
-
-const StickyHeader = ({ children }) => (
-  <thead className="bg-indigo-50 text-gray-700 sticky top-0 z-10">
-    {children}
-  </thead>
-);
-
 const getCurrentAdmin = () => {
   try {
     const stored = JSON.parse(sessionStorage.getItem("adminData") || "{}");
     if (stored && (stored.role || stored.id)) return stored;
-
     const token = sessionStorage.getItem("adminToken");
     if (token) {
       const dec = jwtDecode(token);
@@ -143,35 +85,16 @@ const TambahAdmin = () => {
   // UI state
   const [isSaving, setIsSaving] = useState(false);
   const [msg, setMsg] = useState({ type: "", text: "" });
+  
+  // -- NEW: State untuk Modal Tambah Admin --
+  const [showAddModal, setShowAddModal] = useState(false);
 
-  // Data
+  // Data List (Parent holds the data)
   const [adminList, setAdminList] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
-
-  // Current admin (untuk cek superadmin)
   const [currentAdmin] = useState(getCurrentAdmin());
-  const isSuperadmin = (currentAdmin.role || "").toLowerCase() === "superadmin";
-  const currentAdminId = currentAdmin.id;
 
-  // State ubah role
-  const [roleDrafts, setRoleDrafts] = useState({}); // { [id]: "admin" | "superadmin" }
-  const [roleSaving, setRoleSaving] = useState({}); // { [id]: boolean }
-
-  // State hapus admin
-  const [showDeleteModal, setShowDeleteModal] = useState(false);
-  const [deleteTarget, setDeleteTarget] = useState(null); // admin row
-  const [isDeleting, setIsDeleting] = useState(false);
-
-  // Tabel helpers
-  const [query, setQuery] = useState("");
-  const [sortBy, setSortBy] = useState("created_at");
-  const [sortDir, setSortDir] = useState("desc");
-  const [page, setPage] = useState(1);
-  const pageSize = 8;
-
-  const dismissMessage = useCallback(() => {
-    setMsg({ type: "", text: "" });
-  }, []);
+  const dismissMessage = useCallback(() => setMsg({ type: "", text: "" }), []);
 
   useEffect(() => {
     if (msg.text) {
@@ -191,17 +114,9 @@ const TambahAdmin = () => {
       const data = await res.json();
       if (res.ok && Array.isArray(data)) {
         setAdminList(data);
-
-        // init drafts biar select kebaca
-        const drafts = {};
-        data.forEach((a) => {
-          drafts[a.id] = (a.role || "admin").toLowerCase();
-        });
-        setRoleDrafts(drafts);
       }
     } catch (e) {
       console.error("Gagal memuat riwayat admin:", e);
-      setMsg({ type: "error", text: "Gagal memuat riwayat admin." });
     } finally {
       setIsLoading(false);
     }
@@ -211,39 +126,20 @@ const TambahAdmin = () => {
     fetchAdmins();
   }, [fetchAdmins]);
 
-  // Validasi ringan
-  const emailError =
-    email && !/\S+@\S+\.\S+/.test(email) ? "Format email tidak valid." : "";
-  const pwMatchError =
-    confirmPassword && password !== confirmPassword
-      ? "Konfirmasi tidak sama."
-      : "";
-  const pwLenError =
-    password && password.length < 6 ? "Minimal 6 karakter." : "";
-  const formIncomplete =
-    !username.trim() || !email.trim() || !password || !confirmPassword;
+  // Validasi & Submit Form
+  const emailError = email && !/\S+@\S+\.\S+/.test(email) ? "Format email tidak valid." : "";
+  const pwMatchError = confirmPassword && password !== confirmPassword ? "Konfirmasi tidak sama." : "";
+  const pwLenError = password && password.length < 6 ? "Minimal 6 karakter." : "";
+  const formIncomplete = !username.trim() || !email.trim() || !password || !confirmPassword;
 
-  // Submit tambah admin
   const handleSubmit = async (e) => {
     e.preventDefault();
     dismissMessage();
 
-    if (formIncomplete) {
-      setMsg({ type: "error", text: "Semua field wajib diisi." });
-      return;
-    }
-    if (emailError) {
-      setMsg({ type: "error", text: emailError });
-      return;
-    }
-    if (pwLenError) {
-      setMsg({ type: "error", text: pwLenError });
-      return;
-    }
-    if (pwMatchError) {
-      setMsg({ type: "error", text: "Password dan konfirmasi tidak cocok." });
-      return;
-    }
+    if (formIncomplete) return setMsg({ type: "error", text: "Semua field wajib diisi." });
+    if (emailError) return setMsg({ type: "error", text: emailError });
+    if (pwLenError) return setMsg({ type: "error", text: pwLenError });
+    if (pwMatchError) return setMsg({ type: "error", text: "Password tidak cocok." });
 
     setIsSaving(true);
     const token = sessionStorage.getItem("adminToken");
@@ -260,15 +156,14 @@ const TambahAdmin = () => {
       const data = await res.json();
       if (!res.ok) throw new Error(data.message || "Gagal menambah admin.");
 
+      // Sukses
       setMsg({ type: "success", text: "Admin baru berhasil ditambahkan!" });
-      setUsername("");
-      setEmail("");
-      setPassword("");
-      setConfirmPassword("");
-      setRole("admin");
-      setShowPw(false);
-      setShowPw2(false);
+      handleResetForm();
+      
+      // Refresh list & Tutup Modal (opsional: beri sedikit delay agar notif sukses terbaca)
       await fetchAdmins();
+      setTimeout(() => setShowAddModal(false), 1500); 
+
     } catch (err) {
       setMsg({ type: "error", text: err.message || "Terjadi kesalahan." });
     } finally {
@@ -277,711 +172,155 @@ const TambahAdmin = () => {
   };
 
   const handleResetForm = () => {
-    setUsername("");
-    setEmail("");
-    setPassword("");
-    setConfirmPassword("");
-    setRole("admin");
-    setShowPw(false);
-    setShowPw2(false);
+    setUsername(""); setEmail(""); setPassword(""); setConfirmPassword("");
+    setRole("admin"); setShowPw(false); setShowPw2(false);
+    setMsg({ type: "", text: "" }); // Reset pesan juga saat form direset
   };
 
-  // ====== SIMPAN ROLE (SUPERADMIN SAJA) ======
-  const saveRole = async (adminRow) => {
-    if (!isSuperadmin) return;
-
-    const targetId = adminRow.id;
-    const newRole = (roleDrafts[targetId] || adminRow.role || "admin").toLowerCase();
-    const oldRole = (adminRow.role || "admin").toLowerCase();
-
-    if (newRole === oldRole) return;
-
-    setRoleSaving((p) => ({ ...p, [targetId]: true }));
-    const token = sessionStorage.getItem("adminToken");
-
-    try {
-      const res = await fetch(
-        `${API_URL}/api/admin/update-role/${targetId}`,
-        {
-          method: "PUT",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${token}`,
-          },
-          body: JSON.stringify({ role: newRole }),
-        }
-      );
-
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.message || "Gagal mengubah role.");
-
-      setAdminList((prev) =>
-        prev.map((a) => (a.id === targetId ? { ...a, role: newRole } : a))
-      );
-
-      setMsg({ type: "success", text: `Role ${adminRow.username} berhasil diubah.` });
-    } catch (err) {
-      setRoleDrafts((p) => ({ ...p, [targetId]: oldRole }));
-      setMsg({ type: "error", text: err.message || "Gagal mengubah role." });
-    } finally {
-      setRoleSaving((p) => ({ ...p, [targetId]: false }));
-    }
-  };
-
-  // ====== HAPUS ADMIN (SUPERADMIN SAJA) ======
-  const openDeleteModal = (adminRow) => {
-    if (!isSuperadmin) return;
-    setDeleteTarget(adminRow);
-    setShowDeleteModal(true);
-  };
-
-  const confirmDeleteAdmin = async () => {
-    if (!deleteTarget) return;
-    if (deleteTarget.id === currentAdminId) {
-      setMsg({ type: "error", text: "Tidak bisa menghapus akun sendiri." });
-      setShowDeleteModal(false);
-      setDeleteTarget(null);
-      return;
-    }
-
-    setIsDeleting(true);
-    const token = sessionStorage.getItem("adminToken");
-    try {
-      const res = await fetch(
-        `${API_URL}/api/admin/delete/${deleteTarget.id}`,
-        {
-          method: "DELETE",
-          headers: { Authorization: `Bearer ${token}` },
-        }
-      );
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.message || "Gagal menghapus admin.");
-
-      setAdminList((prev) => prev.filter((a) => a.id !== deleteTarget.id));
-      setRoleDrafts((prev) => {
-        const cp = { ...prev };
-        delete cp[deleteTarget.id];
-        return cp;
-      });
-
-      setMsg({
-        type: "success",
-        text: `Admin "${deleteTarget.username}" berhasil dihapus.`,
-      });
-    } catch (err) {
-      setMsg({ type: "error", text: err.message || "Gagal menghapus admin." });
-    } finally {
-      setIsDeleting(false);
-      setShowDeleteModal(false);
-      setDeleteTarget(null);
-    }
-  };
-
-  // Derive data tabel
-  const processed = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    let list = adminList;
-    if (q) {
-      list = list.filter((a) => {
-        const hay = `${a.username || ""} ${a.email || ""} ${a.role || ""} ${
-          a.invited_by || ""
-        }`.toLowerCase();
-        return hay.includes(q);
-      });
-    }
-    list = [...list].sort((a, b) => {
-      const dir = sortDir === "asc" ? 1 : -1;
-      const va =
-        sortBy === "created_at"
-          ? new Date(a[sortBy] || 0).getTime()
-          : (a[sortBy] || "").toString().toLowerCase();
-      const vb =
-        sortBy === "created_at"
-          ? new Date(b[sortBy] || 0).getTime()
-          : (b[sortBy] || "").toString().toLowerCase();
-
-      if (va < vb) return -1 * dir;
-      if (va > vb) return 1 * dir;
-      return 0;
-    });
-    return list;
-  }, [adminList, query, sortBy, sortDir]);
-
-  const total = processed.length;
-  const totalPages = Math.max(1, Math.ceil(total / pageSize));
-  const pageSafe = Math.min(Math.max(1, page), totalPages);
-  const startIdx = (pageSafe - 1) * pageSize;
-  const pageRows = processed.slice(startIdx, startIdx + pageSize);
-
-  useEffect(() => {
-    setPage(1);
-  }, [query, sortBy, sortDir]);
-
-  const toggleSort = (key) => {
-    if (sortBy === key) {
-      setSortDir((d) => (d === "asc" ? "desc" : "asc"));
-    } else {
-      setSortBy(key);
-      setSortDir("asc");
-    }
-  };
-
-  const sortIcon = (key) => {
-    if (sortBy !== key) return <FaSort className="inline-block ml-1" />;
-    return sortDir === "asc" ? (
-      <FaSortUp className="inline-block ml-1" />
-    ) : (
-      <FaSortDown className="inline-block ml-1" />
-    );
-  };
+  const closeModal = () => {
+    setShowAddModal(false);
+    handleResetForm();
+  }
 
   const pwStrength = calcStrength(password);
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-white to-gray-50">
-      {/* Page Header */}
-      <div className="bg-white border-b border-gray-200 shadow-sm px-6 py-5 sticky top-0 z-40">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-indigo-600 text-white flex items-center justify-center shadow-sm">
-            <FaShieldAlt />
-          </div>
-          <div>
-            <h1 className="text-xl md:text-2xl font-bold text-gray-900">
-              Manajemen Admin
-            </h1>
-            <p className="text-sm text-gray-600">
-              Tambah admin baru, ubah role, dan hapus akun admin.
-            </p>
-          </div>
+    <div className="min-h-screen bg-gray-50 pb-10">
+      
+      {/* Page Header / Navbar */}
+      <div className="bg-white shadow-sm border-b border-gray-300 py-4 pl-14 pr-4 md:px-8 md:py-5 sticky top-0 z-50 flex items-center gap-3 transition-all">
+        {/* Icon: Hidden di mobile */}
+        <div className="hidden md:flex w-10 h-10 rounded-xl bg-indigo-600 text-white items-center justify-center shadow-sm">
+          <FaShieldAlt />
+        </div>
+        <div>
+          <h1 className="text-xl md:text-2xl font-semibold text-gray-900">Manajemen Admin</h1>
+          {/* Deskripsi: Hidden di mobile */}
+          <p className="hidden md:block text-sm text-gray-600 mt-1">Kelola akun admin dan hak akses sistem.</p>
         </div>
       </div>
 
-      <div className="p-6">
-        <MemoizedMessage {...msg} onDismiss={dismissMessage} />
+      <div className="p-4 md:p-6 lg:p-8">
+        
+        {/* Tampilkan pesan sukses global jika modal tertutup */}
+        {!showAddModal && msg.type === 'success' && (
+             <div className="max-w-4xl mx-auto mb-4">
+                 <MemoizedMessage {...msg} onDismiss={dismissMessage} />
+             </div>
+        )}
 
-        <div className="grid grid-cols-1 lg:grid-cols-5 gap-6 items-start">
-          {/* ================= Form Card ================= */}
-          <div className="lg:col-span-2">
-            <div className="bg-white border border-gray-200 rounded-2xl shadow-sm overflow-hidden">
-              <div className="px-5 py-4 border-b bg-gray-50/60 flex items-center gap-2">
-                <FaUserPlus className="text-indigo-600" />
-                <h2 className="text-base font-semibold text-gray-900">
-                  Tambah Admin Baru
-                </h2>
-              </div>
-
-              <form onSubmit={handleSubmit} className="p-5 space-y-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Username
-                  </label>
-                  <div className="relative">
-                    <span className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-gray-400">
-                      <FaUser />
-                    </span>
-                    <input
-                      type="text"
-                      value={username}
-                      onChange={(e) => setUsername(e.target.value)}
-                      className="block w-full pl-10 pr-3 py-2.5 border border-gray-300 rounded-xl shadow-sm placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
-                      placeholder="Username unik"
-                      autoComplete="off"
-                    />
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Email
-                  </label>
-                  <div className="relative">
-                    <span className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-gray-400">
-                      <FaEnvelope />
-                    </span>
-                    <input
-                      type="email"
-                      value={email}
-                      onChange={(e) => setEmail(e.target.value)}
-                      className={`block w-full pl-10 pr-10 py-2.5 border rounded-xl shadow-sm placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 ${
-                        emailError
-                          ? "border-red-300 focus:border-red-500"
-                          : "border-gray-300 focus:border-indigo-500"
-                      }`}
-                      placeholder="admin@contoh.com"
-                      autoComplete="off"
-                    />
-                  </div>
-                  {!!emailError && (
-                    <p className="mt-1 text-xs text-red-600">{emailError}</p>
-                  )}
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Peran / Role
-                  </label>
-                  <div className="relative">
-                    <span className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-gray-400">
-                      <FaUserShield />
-                    </span>
-                    <select
-                      value={role}
-                      onChange={(e) => setRole(e.target.value)}
-                      className="block w-full pl-10 pr-10 py-2.5 border border-gray-300 rounded-xl shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 bg-white appearance-none"
-                    >
-                      <option value="admin">Admin (Biasa)</option>
-                      <option value="superadmin">Super Admin</option>
-                    </select>
-                    <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-gray-700">
-                      <svg
-                        className="fill-current h-4 w-4"
-                        xmlns="http://www.w3.org/2000/svg"
-                        viewBox="0 0 20 20"
-                      >
-                        <path d="M9.293 12.95l.707.707L15.657 8l-1.414-1.414L10 10.828 5.757 6.586 4.343 8z" />
-                      </svg>
-                    </div>
-                  </div>
-                  <p className="mt-1 text-xs text-gray-500">
-                    Super Admin memiliki akses penuh ke semua pengaturan.
-                  </p>
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Password
-                  </label>
-                  <div className="relative">
-                    <span className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-gray-400">
-                      <FaKey />
-                    </span>
-                    <input
-                      type={showPw ? "text" : "password"}
-                      value={password}
-                      onChange={(e) => setPassword(e.target.value)}
-                      className={`block w-full pl-10 pr-10 py-2.5 border rounded-xl shadow-sm placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 ${
-                        pwLenError
-                          ? "border-red-300 focus:border-red-500"
-                          : "border-gray-300 focus:border-indigo-500"
-                      }`}
-                      placeholder="Minimal 6 karakter"
-                      autoComplete="new-password"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setShowPw((v) => !v)}
-                      className="absolute right-2 top-1/2 -translate-y-1/2 p-2 text-gray-500 hover:text-gray-700"
-                      title={showPw ? "Sembunyikan" : "Tampilkan"}
-                      aria-label="Toggle password visibility"
-                    >
-                      {showPw ? <FaEyeSlash /> : <FaEye />}
-                    </button>
-                  </div>
-                  {!!pwLenError && (
-                    <p className="mt-1 text-xs text-red-600">{pwLenError}</p>
-                  )}
-
-                  <div className="mt-2">
-                    <div className="flex gap-1">
-                      {[0, 1, 2, 3].map((i) => (
-                        <div
-                          key={i}
-                          className={`h-1.5 flex-1 rounded-full ${
-                            pwStrength > i ? "bg-indigo-500" : "bg-gray-200"
-                          }`}
-                        />
-                      ))}
-                    </div>
-                    <p className="mt-1 text-xs text-gray-500">
-                      Kekuatan: {strengthLabel(pwStrength)}
-                    </p>
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Konfirmasi Password
-                  </label>
-                  <div className="relative">
-                    <span className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-gray-400">
-                      <FaKey />
-                    </span>
-                    <input
-                      type={showPw2 ? "text" : "password"}
-                      value={confirmPassword}
-                      onChange={(e) => setConfirmPassword(e.target.value)}
-                      className={`block w-full pl-10 pr-10 py-2.5 border rounded-xl shadow-sm placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 ${
-                        pwMatchError
-                          ? "border-red-300 focus:border-red-500"
-                          : "border-gray-300 focus:border-indigo-500"
-                      }`}
-                      placeholder="Ulangi password"
-                      autoComplete="new-password"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setShowPw2((v) => !v)}
-                      className="absolute right-2 top-1/2 -translate-y-1/2 p-2 text-gray-500 hover:text-gray-700"
-                      title={showPw2 ? "Sembunyikan" : "Tampilkan"}
-                      aria-label="Toggle password visibility"
-                    >
-                      {showPw2 ? <FaEyeSlash /> : <FaEye />}
-                    </button>
-                  </div>
-                  {!!pwMatchError && (
-                    <p className="mt-1 text-xs text-red-600">{pwMatchError}</p>
-                  )}
-                </div>
-
-                <div className="flex items-center gap-2 pt-2">
-                  <button
-                    type="submit"
-                    disabled={
-                      isSaving ||
-                      formIncomplete ||
-                      !!emailError ||
-                      !!pwLenError ||
-                      !!pwMatchError
-                    }
-                    className="inline-flex items-center justify-center gap-2 px-5 py-2.5 bg-indigo-600 text-white font-semibold rounded-xl hover:bg-indigo-700 transition disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    {isSaving ? (
-                      <FaSpinner className="animate-spin" />
-                    ) : (
-                      <FaUserPlus />
-                    )}
-                    {isSaving ? "Menyimpan..." : "Tambah Admin"}
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={handleResetForm}
-                    className="px-4 py-2.5 rounded-xl border border-gray-300 text-gray-700 hover:bg-gray-50"
-                  >
-                    Reset
-                  </button>
-                </div>
-              </form>
-            </div>
-          </div>
-
-          {/* ================= Table Card ================= */}
-          <div className="lg:col-span-3">
-            <div className="bg-white border border-gray-200 rounded-2xl shadow-sm overflow-hidden">
-              <div className="p-5 border-b bg-gray-50/60">
-                <div className="flex flex-col sm:flex-row sm:items-center gap-3">
-                  <div className="relative w-full sm:max-w-xs">
-                    <FaSearch className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-                    <input
-                      value={query}
-                      onChange={(e) => setQuery(e.target.value)}
-                      placeholder="Cari username / email / role…"
-                      className="w-full pl-9 pr-3 py-2.5 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
-                    />
-                  </div>
-                  <div className="text-sm text-gray-600">
-                    Total:{" "}
-                    <span className="font-semibold text-gray-800">{total}</span>{" "}
-                    akun
-                  </div>
-                </div>
-              </div>
-
-              <div className="overflow-auto border-t border-gray-200">
-                <table className="w-full text-sm text-left">
-                  <StickyHeader>
-                    <tr>
-                      <th className="p-3 min-w-[160px]">
-                        <button
-                          type="button"
-                          onClick={() => toggleSort("username")}
-                          className="inline-flex items-center gap-1 hover:text-indigo-600"
-                          title="Urutkan"
-                        >
-                          Username {sortIcon("username")}
-                        </button>
-                      </th>
-                      <th className="p-3 min-w-[220px]">
-                        <button
-                          type="button"
-                          onClick={() => toggleSort("email")}
-                          className="inline-flex items-center gap-1 hover:text-indigo-600"
-                          title="Urutkan"
-                        >
-                          Email {sortIcon("email")}
-                        </button>
-                      </th>
-                      <th className="p-3 min-w-[180px]">Role</th>
-                      {isSuperadmin && (
-                        <th className="p-3 min-w-[150px] text-center">Aksi</th>
-                      )}
-                      <th className="p-3 min-w-[160px]">
-                        <button
-                          type="button"
-                          onClick={() => toggleSort("invited_by")}
-                          className="inline-flex items-center gap-1 hover:text-indigo-600"
-                          title="Urutkan"
-                        >
-                          Dibuat Oleh {sortIcon("invited_by")}
-                        </button>
-                      </th>
-                      <th className="p-3 min-w-[170px]">
-                        <button
-                          type="button"
-                          onClick={() => toggleSort("created_at")}
-                          className="inline-flex items-center gap-1 hover:text-indigo-600"
-                          title="Urutkan"
-                        >
-                          Tanggal {sortIcon("created_at")}
-                        </button>
-                      </th>
-                    </tr>
-                  </StickyHeader>
-
-                  <tbody>
-                    {isLoading ? (
-                      Array.from({ length: 6 }).map((_, i) => (
-                        <tr key={i} className="animate-pulse border-t border-gray-100">
-                          <td className="p-3">
-                            <div className="h-3 w-28 bg-gray-200 rounded" />
-                          </td>
-                          <td className="p-3">
-                            <div className="h-3 w-40 bg-gray-200 rounded" />
-                          </td>
-                          <td className="p-3">
-                            <div className="h-3 w-20 bg-gray-200 rounded" />
-                          </td>
-                          {isSuperadmin && (
-                            <td className="p-3">
-                              <div className="h-7 w-28 bg-gray-200 rounded mx-auto" />
-                            </td>
-                          )}
-                          <td className="p-3">
-                            <div className="h-3 w-24 bg-gray-200 rounded" />
-                          </td>
-                          <td className="p-3">
-                            <div className="h-3 w-32 bg-gray-200 rounded" />
-                          </td>
-                        </tr>
-                      ))
-                    ) : pageRows.length > 0 ? (
-                      pageRows.map((a) => {
-                        const rowRole = (a.role || "admin").toLowerCase();
-                        const draftRole = (roleDrafts[a.id] || rowRole).toLowerCase();
-                        const isSelf = a.id === currentAdminId;
-
-                        return (
-                          <tr
-                            key={a.id}
-                            className="border-t border-gray-100 odd:bg-white even:bg-gray-50 hover:bg-indigo-50/40 transition-colors"
-                          >
-                            <td className="p-3 font-medium text-gray-800">
-                              {a.username}
-                              {isSelf && (
-                                <span className="ml-2 text-[10px] px-2 py-0.5 rounded-full bg-gray-200 text-gray-700">
-                                  kamu
-                                </span>
-                              )}
-                            </td>
-                            <td className="p-3 text-gray-700">{a.email}</td>
-
-                            {/* Role editable utk superadmin */}
-                            <td className="p-3">
-                              {isSuperadmin ? (
-                                <select
-                                  value={draftRole}
-                                  onChange={(e) =>
-                                    setRoleDrafts((p) => ({
-                                      ...p,
-                                      [a.id]: e.target.value,
-                                    }))
-                                  }
-                                  disabled={roleSaving[a.id] || isSelf}
-                                  className={`px-2.5 py-1.5 rounded-lg text-xs border bg-white capitalize
-                                    ${
-                                      isSelf
-                                        ? "border-gray-200 text-gray-400 cursor-not-allowed"
-                                        : "border-gray-300 text-gray-700 hover:border-indigo-400"
-                                    }`}
-                                  title={
-                                    isSelf
-                                      ? "Tidak bisa ubah role akun sendiri"
-                                      : "Ubah role"
-                                  }
-                                >
-                                  <option value="admin">Admin</option>
-                                  <option value="superadmin">Superadmin</option>
-                                </select>
-                              ) : (
-                                <RoleBadge role={rowRole} />
-                              )}
-                            </td>
-
-                            {isSuperadmin && (
-                              <td className="p-3 text-center">
-                                <div className="inline-flex items-center gap-2">
-                                  <button
-                                    type="button"
-                                    onClick={() => saveRole(a)}
-                                    disabled={
-                                      roleSaving[a.id] ||
-                                      isSelf ||
-                                      draftRole === rowRole
-                                    }
-                                    className="inline-flex items-center justify-center gap-1 px-2.5 py-1.5 text-xs font-semibold rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 transition disabled:opacity-50 disabled:cursor-not-allowed"
-                                    title="Simpan perubahan role"
-                                  >
-                                    {roleSaving[a.id] ? (
-                                      <FaSpinner className="animate-spin" />
-                                    ) : (
-                                      <FaSave />
-                                    )}
-                                    Simpan
-                                  </button>
-
-                                  <button
-                                    type="button"
-                                    onClick={() => openDeleteModal(a)}
-                                    disabled={isSelf}
-                                    className="inline-flex items-center justify-center px-2.5 py-1.5 text-xs font-semibold rounded-lg border border-red-200 bg-red-50 text-red-700 hover:bg-red-100 transition disabled:opacity-50 disabled:cursor-not-allowed"
-                                    title={
-                                      isSelf
-                                        ? "Tidak bisa hapus akun sendiri"
-                                        : "Hapus akun admin"
-                                    }
-                                  >
-                                    <FaTrash />
-                                  </button>
-                                </div>
-                              </td>
-                            )}
-
-                            <td className="p-3 text-gray-700">
-                              {a.invited_by || "-"}
-                            </td>
-                            <td className="p-3 text-gray-600">
-                              {formatTanggal(a.created_at)}
-                            </td>
-                          </tr>
-                        );
-                      })
-                    ) : (
-                      <tr>
-                        <td
-                          colSpan={isSuperadmin ? 6 : 5}
-                          className="p-8 text-center"
-                        >
-                          <div className="flex flex-col items-center gap-2 text-gray-600">
-                            <FaClipboardList className="text-2xl" />
-                            <p className="text-sm">
-                              Belum ada data admin yang cocok.
-                            </p>
-                          </div>
-                        </td>
-                      </tr>
-                    )}
-                  </tbody>
-                </table>
-              </div>
-
-              {/* Pagination */}
-              <div className="flex flex-col sm:flex-row items-center justify-between gap-3 p-5 border-t bg-white">
-                <div className="text-xs text-gray-500">
-                  Menampilkan{" "}
-                  <span className="font-semibold text-gray-700">
-                    {total === 0 ? 0 : startIdx + 1}–
-                    {Math.min(startIdx + pageSize, total)}
-                  </span>{" "}
-                  dari <span className="font-semibold">{total}</span> data
-                </div>
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setPage((p) => Math.max(1, p - 1))}
-                    disabled={pageSafe === 1}
-                    className="px-3 py-1.5 text-sm rounded-lg border border-gray-300 hover:bg-gray-50 disabled:opacity-50"
-                  >
-                    Prev
-                  </button>
-                  <span className="text-sm text-gray-700">
-                    {pageSafe} / {totalPages}
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-                    disabled={pageSafe === totalPages}
-                    className="px-3 py-1.5 text-sm rounded-lg border border-gray-300 hover:bg-gray-50 disabled:opacity-50"
-                  >
-                    Next
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-          {/* end grid */}
+        {/* ================= MAIN CONTENT: DAFTAR ADMIN ================= */}
+        <div className="max-w-[1600px] mx-auto">
+             <DaftarAdmin 
+                adminList={adminList} 
+                isLoading={isLoading} 
+                onRefresh={fetchAdmins} 
+                currentUser={currentAdmin}
+                onAddClick={() => setShowAddModal(true)} // Trigger Modal
+             />
         </div>
+
       </div>
 
-      {/* ================= Modal Hapus Admin ================= */}
-      {showDeleteModal && deleteTarget && (
-        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/40 backdrop-blur-[2px]">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6 md:p-7">
-            <div className="flex justify-center mb-4">
-              <div className="w-14 h-14 rounded-full bg-red-50 flex items-center justify-center">
-                <FaExclamationTriangle className="text-3xl text-red-500" />
+      {/* ================= MODAL TAMBAH ADMIN ================= */}
+      {showAddModal && (
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 animate-fade-in">
+           {/* Modal Overlay Click to Close */}
+           <div className="absolute inset-0" onClick={closeModal}></div>
+
+           {/* Modal Content */}
+           <div className="relative bg-white w-full max-w-lg rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
+              
+              {/* Modal Header */}
+              <div className="px-6 py-4 border-b bg-gray-50 flex items-center justify-between">
+                 <div className="flex items-center gap-2">
+                    <div className="bg-indigo-100 p-2 rounded-lg text-indigo-600">
+                        <FaUserPlus />
+                    </div>
+                    <h2 className="text-lg font-bold text-gray-800">Tambah Admin Baru</h2>
+                 </div>
+                 <button onClick={closeModal} className="text-gray-400 hover:text-gray-600 p-1 rounded-md hover:bg-gray-200 transition">
+                    <FaTimes size={18} />
+                 </button>
               </div>
-            </div>
 
-            <h2 className="text-xl font-bold text-center text-gray-800 mb-2">
-              Hapus akun admin?
-            </h2>
-            <p className="text-center text-gray-600 mb-6 text-sm">
-              Kamu akan menghapus akun:
-              <br />
-              <span className="font-semibold text-gray-800">
-                {deleteTarget.username}
-              </span>{" "}
-              ({deleteTarget.email})
-            </p>
+              {/* Modal Body (Scrollable) */}
+              <div className="p-6 overflow-y-auto">
+                 <MemoizedMessage {...msg} onDismiss={dismissMessage} />
 
-            <div className="bg-red-50 border border-red-100 text-red-700 text-xs rounded-xl p-3 mb-6">
-              Aksi ini permanen dan akun tidak bisa login lagi. Ujian yang dibuat admin ini akan tetap ada,
-              tetapi relasi admin-nya akan menjadi kosong (NULL).
-            </div>
+                 <form onSubmit={handleSubmit} className="space-y-4">
+                    
+                    {/* Username */}
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Username</label>
+                      <div className="relative">
+                        <span className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-gray-400"><FaUser /></span>
+                        <input type="text" value={username} onChange={(e) => setUsername(e.target.value)} className="block w-full pl-10 pr-3 py-2.5 border border-gray-300 rounded-xl shadow-sm focus:ring-2 focus:ring-indigo-500/20 outline-none transition" placeholder="Username unik" />
+                      </div>
+                    </div>
 
-            <div className="grid grid-cols-2 gap-3">
-              <button
-                onClick={() => {
-                  if (!isDeleting) {
-                    setShowDeleteModal(false);
-                    setDeleteTarget(null);
-                  }
-                }}
-                disabled={isDeleting}
-                className="px-4 py-2.5 bg-gray-200 text-gray-800 font-semibold rounded-xl hover:bg-gray-300 transition disabled:opacity-50"
-              >
-                Batal
-              </button>
+                    {/* Email */}
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Email</label>
+                      <div className="relative">
+                        <span className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-gray-400"><FaEnvelope /></span>
+                        <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} className={`block w-full pl-10 pr-3 py-2.5 border rounded-xl shadow-sm focus:ring-2 focus:ring-indigo-500/20 outline-none transition ${emailError ? "border-red-300" : "border-gray-300"}`} placeholder="admin@contoh.com" />
+                      </div>
+                      {emailError && <p className="mt-1 text-xs text-red-600">{emailError}</p>}
+                    </div>
 
-              <button
-                onClick={confirmDeleteAdmin}
-                disabled={isDeleting}
-                className="px-4 py-2.5 bg-red-600 text-white font-semibold rounded-xl hover:bg-red-700 transition disabled:opacity-50 flex items-center justify-center gap-2"
-              >
-                {isDeleting ? (
-                  <>
-                    <FaSpinner className="animate-spin" />
-                    Menghapus...
-                  </>
-                ) : (
-                  <>
-                    <FaTrash />
-                    Ya, Hapus
-                  </>
-                )}
-              </button>
-            </div>
-          </div>
+                    {/* Role */}
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Role</label>
+                      <div className="relative">
+                        <span className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-gray-400"><FaUserShield /></span>
+                        <select value={role} onChange={(e) => setRole(e.target.value)} className="block w-full pl-10 pr-10 py-2.5 border border-gray-300 rounded-xl bg-white focus:ring-2 focus:ring-indigo-500/20 outline-none transition cursor-pointer">
+                          <option value="admin">Admin (Biasa)</option>
+                          <option value="superadmin">Super Admin</option>
+                        </select>
+                      </div>
+                    </div>
+
+                    {/* Password */}
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Password</label>
+                      <div className="relative">
+                        <span className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-gray-400"><FaKey /></span>
+                        <input type={showPw ? "text" : "password"} value={password} onChange={(e) => setPassword(e.target.value)} className={`block w-full pl-10 pr-10 py-2.5 border rounded-xl shadow-sm focus:ring-2 focus:ring-indigo-500/20 outline-none transition ${pwLenError ? "border-red-300" : "border-gray-300"}`} placeholder="Minimal 6 karakter" />
+                        <button type="button" onClick={() => setShowPw(!showPw)} className="absolute right-2 top-1/2 -translate-y-1/2 p-2 text-gray-500 hover:text-indigo-600 transition">{showPw ? <FaEyeSlash /> : <FaEye />}</button>
+                      </div>
+                      {pwLenError && <p className="mt-1 text-xs text-red-600">{pwLenError}</p>}
+                      {/* Strength Meter */}
+                      <div className="mt-2 flex gap-1">
+                        {[0, 1, 2, 3].map((i) => <div key={i} className={`h-1.5 flex-1 rounded-full transition-colors duration-300 ${pwStrength > i ? "bg-indigo-500" : "bg-gray-200"}`} />)}
+                      </div>
+                      <p className="mt-1 text-xs text-gray-500">Kekuatan: {strengthLabel(pwStrength)}</p>
+                    </div>
+
+                    {/* Konfirmasi Password */}
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Konfirmasi Password</label>
+                      <div className="relative">
+                        <span className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-gray-400"><FaKey /></span>
+                        <input type={showPw2 ? "text" : "password"} value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} className={`block w-full pl-10 pr-10 py-2.5 border rounded-xl shadow-sm focus:ring-2 focus:ring-indigo-500/20 outline-none transition ${pwMatchError ? "border-red-300" : "border-gray-300"}`} placeholder="Ulangi password" />
+                        <button type="button" onClick={() => setShowPw2(!showPw2)} className="absolute right-2 top-1/2 -translate-y-1/2 p-2 text-gray-500 hover:text-indigo-600 transition">{showPw2 ? <FaEyeSlash /> : <FaEye />}</button>
+                      </div>
+                      {pwMatchError && <p className="mt-1 text-xs text-red-600">{pwMatchError}</p>}
+                    </div>
+
+                    {/* Action Buttons */}
+                    <div className="flex items-center gap-3 pt-4 border-t border-gray-100 mt-6">
+                       <button type="button" onClick={closeModal} className="flex-1 py-2.5 rounded-xl border border-gray-300 text-gray-700 hover:bg-gray-50 font-medium transition">
+                          Batal
+                       </button>
+                       <button type="submit" disabled={isSaving || formIncomplete || emailError || pwLenError || pwMatchError} className="flex-1 inline-flex items-center justify-center gap-2 py-2.5 bg-indigo-600 text-white font-semibold rounded-xl hover:bg-indigo-700 transition disabled:opacity-50 shadow-md hover:shadow-lg">
+                          {isSaving ? <FaSpinner className="animate-spin" /> : <FaUserPlus />} {isSaving ? "Menyimpan..." : "Simpan Admin"}
+                       </button>
+                    </div>
+
+                 </form>
+              </div>
+           </div>
         </div>
       )}
     </div>

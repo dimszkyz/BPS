@@ -1,13 +1,14 @@
-// File: src/routes/authAdmin.js (FULL UPDATED - Forgot Password with WhatsApp)
+// File: src/routes/authAdmin.js
+// (FINAL: Updated with Email Notification Logic)
 
 const express = require("express");
 const router = express.Router();
 const pool = require("../db");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
+const nodemailer = require("nodemailer"); // <--- TAMBAHAN BARU
 const verifyAdmin = require("../middleware/verifyAdmin");
 
-// Tidak perlu node-fetch di Node >=18. 'fetch' sudah global.
 const JWT_SECRET = process.env.JWT_SECRET || "kunci-rahasia-default";
 const RECAPTCHA_SECRET_KEY = process.env.RECAPTCHA_SECRET_KEY;
 
@@ -20,7 +21,6 @@ const isValidWhatsApp = (wa) => {
 
 // ===================================
 // POST /api/admin/login
-// (Tidak ada perubahan)
 // ===================================
 router.post("/login", async (req, res) => {
   try {
@@ -72,10 +72,17 @@ router.post("/login", async (req, res) => {
 
     const admin = rows[0];
 
+    // --- CEK STATUS AKTIF ---
+    if (admin.is_active === 0 || admin.is_active === false) {
+      return res.status(403).json({ 
+        message: "Akun ini telah dinonaktifkan oleh Superadmin. Hubungi admin utama." 
+      });
+    }
+
     // 4) Cek password
     const ok = await bcrypt.compare(password, admin.password_hash);
     if (!ok) {
-      return res.status(401).json({ message: "periksa kembali username / email dan password anda" });
+      return res.status(401).json({ message: "Periksa kembali username / email dan password anda" });
     }
 
     // 5) Buat JWT
@@ -107,7 +114,6 @@ router.post("/login", async (req, res) => {
 
 // ===================================
 // GET /api/admin/invite-history
-// (Tidak ada perubahan)
 // ===================================
 router.get("/invite-history", verifyAdmin, async (req, res) => {
   try {
@@ -118,6 +124,7 @@ router.get("/invite-history", verifyAdmin, async (req, res) => {
         a.email,
         a.role,
         a.created_at,
+        a.is_active,
         c.username AS invited_by
       FROM admins a
       LEFT JOIN admins c ON a.created_by_admin_id = c.id
@@ -130,9 +137,50 @@ router.get("/invite-history", verifyAdmin, async (req, res) => {
   }
 });
 
+router.put("/update-username/:id", verifyAdmin, async (req, res) => {
+  try {
+    const requesterRole = (req.admin.role || "").toLowerCase();
+    if (requesterRole !== "superadmin") {
+      return res.status(403).json({ message: "Hanya Superadmin yang dapat mengubah username." });
+    }
+
+    const targetId = parseInt(req.params.id, 10);
+    const { username } = req.body;
+
+    if (!targetId) return res.status(400).json({ message: "ID tidak valid." });
+    if (!username || username.trim().length < 3) {
+      return res.status(400).json({ message: "Username minimal 3 karakter." });
+    }
+
+    // Cek Unik
+    const [existing] = await pool.execute(
+      "SELECT id FROM admins WHERE username = ? AND id != ? LIMIT 1",
+      [username, targetId]
+    );
+
+    if (existing.length > 0) {
+      return res.status(409).json({ message: "Username sudah digunakan oleh admin lain." });
+    }
+
+    const [result] = await pool.execute(
+      "UPDATE admins SET username = ? WHERE id = ?",
+      [username, targetId]
+    );
+
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ message: "Admin tidak ditemukan." });
+    }
+
+    return res.json({ message: "Username berhasil diperbarui.", username });
+
+  } catch (err) {
+    console.error("Error update username:", err);
+    return res.status(500).json({ message: "Terjadi kesalahan server." });
+  }
+});
+
 // ===================================
 // POST /api/admin/change-password
-// (Tidak ada perubahan)
 // ===================================
 router.post("/change-password", verifyAdmin, async (req, res) => {
   try {
@@ -161,7 +209,6 @@ router.post("/change-password", verifyAdmin, async (req, res) => {
     }
 
     const admin = rows[0];
-
     const isOldOk = await bcrypt.compare(currentPassword, admin.password_hash);
     if (!isOldOk) {
       return res.status(401).json({ message: "Password lama salah." });
@@ -195,11 +242,12 @@ router.post("/change-password", verifyAdmin, async (req, res) => {
 
 // ===================================
 // PUT /api/admin/update-role/:id
-// (Tidak ada perubahan)
 // ===================================
 router.put("/update-role/:id", verifyAdmin, async (req, res) => {
   try {
     const requesterRole = (req.admin.role || "").toLowerCase();
+    const requesterId = req.admin.id;
+    
     if (requesterRole !== "superadmin") {
       return res
         .status(403)
@@ -215,11 +263,27 @@ router.put("/update-role/:id", verifyAdmin, async (req, res) => {
       return res.status(400).json({ message: "Role tidak valid." });
     }
 
-    if (targetId === req.admin.id) {
+    if (targetId === requesterId) {
       return res
         .status(400)
         .json({ message: "Tidak bisa mengubah role akun sendiri." });
     }
+
+    // --- LOGIC BARU: CEK HIERARKI ---
+    // Ambil data requester untuk melihat siapa creator-nya
+    const [reqRows] = await pool.execute("SELECT created_by_admin_id FROM admins WHERE id = ?", [requesterId]);
+    const creatorId = reqRows[0]?.created_by_admin_id;
+
+    // Jika target adalah ID 1 (Master Superadmin), tolak mutlak
+    if (targetId === 1) {
+       return res.status(403).json({ message: "Role Akun Utama (Root) tidak dapat diubah." });
+    }
+
+    // Jika target adalah pembuat akun saya, tolak
+    if (creatorId && creatorId === targetId) {
+        return res.status(403).json({ message: "Anda tidak memiliki wewenang mengubah role atasan yang membuat akun Anda." });
+    }
+    // --------------------------------
 
     const [result] = await pool.execute(
       "UPDATE admins SET role = ? WHERE id = ?",
@@ -241,8 +305,72 @@ router.put("/update-role/:id", verifyAdmin, async (req, res) => {
 });
 
 // ===================================
+// PUT /api/admin/toggle-status/:id
+// ===================================
+router.put("/toggle-status/:id", verifyAdmin, async (req, res) => {
+  try {
+    const requesterRole = (req.admin.role || "").toLowerCase();
+    const requesterId = req.admin.id;
+
+    if (requesterRole !== "superadmin") {
+      return res.status(403).json({ message: "Hanya Superadmin yang dapat mengubah status akun." });
+    }
+
+    const targetId = parseInt(req.params.id, 10);
+    if (!targetId) return res.status(400).json({ message: "ID admin tidak valid." });
+
+    if (targetId === requesterId) {
+      return res.status(400).json({ message: "Tidak bisa menonaktifkan akun sendiri." });
+    }
+
+    // --- LOGIC BARU: CEK HIERARKI ---
+    // 1. Cek apakah target adalah Superadmin Utama (ID 1)
+    if (targetId === 1) {
+        return res.status(403).json({ message: "Akun Superadmin Utama tidak dapat dinonaktifkan." });
+    }
+
+    // 2. Ambil data requester untuk melihat siapa creator-nya
+    const [reqRows] = await pool.execute("SELECT created_by_admin_id FROM admins WHERE id = ?", [requesterId]);
+    const creatorId = reqRows[0]?.created_by_admin_id;
+
+    // 3. Jika target adalah creator dari requester, tolak akses
+    if (creatorId && creatorId === targetId) {
+        return res.status(403).json({ 
+            message: "Akses Ditolak: Anda tidak dapat menonaktifkan admin yang membuat/mempromosikan akun Anda." 
+        });
+    }
+    // --------------------------------
+
+    // Cek status sekarang
+    const [rows] = await pool.execute(
+      "SELECT id, username, is_active FROM admins WHERE id = ? LIMIT 1",
+      [targetId]
+    );
+    if (rows.length === 0) {
+      return res.status(404).json({ message: "Admin tidak ditemukan." });
+    }
+
+    const currentStatus = rows[0].is_active;
+    const isActiveBool = (currentStatus === 1 || currentStatus === true);
+    const newStatus = isActiveBool ? 0 : 1;
+    
+    const statusText = newStatus === 1 ? "diaktifkan kembali" : "dinonaktifkan";
+
+    await pool.execute("UPDATE admins SET is_active = ? WHERE id = ?", [newStatus, targetId]);
+
+    return res.json({ 
+      message: `Admin ${rows[0].username} berhasil ${statusText}.`,
+      newStatus: newStatus
+    });
+
+  } catch (err) {
+    console.error("Error toggle status admin:", err);
+    return res.status(500).json({ message: "Gagal mengubah status admin." });
+  }
+});
+
+// ===================================
 // DELETE /api/admin/delete/:id
-// (Tidak ada perubahan)
 // ===================================
 router.delete("/delete/:id", verifyAdmin, async (req, res) => {
   try {
@@ -266,6 +394,21 @@ router.delete("/delete/:id", verifyAdmin, async (req, res) => {
         .json({ message: "Tidak bisa menghapus akun sendiri." });
     }
 
+    // --- LOGIC BARU: CEK HIERARKI ---
+    if (targetId === 1) {
+        return res.status(403).json({ message: "Akun Superadmin Utama tidak dapat dihapus." });
+    }
+
+    const [reqRows] = await pool.execute("SELECT created_by_admin_id FROM admins WHERE id = ?", [requesterId]);
+    const creatorId = reqRows[0]?.created_by_admin_id;
+
+    if (creatorId && creatorId === targetId) {
+        return res.status(403).json({ 
+            message: "Akses Ditolak: Anda tidak dapat menghapus admin yang membuat akun Anda." 
+        });
+    }
+    // --------------------------------
+
     const [rows] = await pool.execute(
       "SELECT id, username, role FROM admins WHERE id = ? LIMIT 1",
       [targetId]
@@ -276,7 +419,7 @@ router.delete("/delete/:id", verifyAdmin, async (req, res) => {
 
     await pool.execute("DELETE FROM admins WHERE id = ?", [targetId]);
 
-    return res.json({ message: "Admin berhasil dihapus." });
+    return res.json({ message: "Admin berhasil dihapus secara permanen." });
   } catch (err) {
     console.error("Error delete admin:", err);
     return res.status(500).json({ message: "Gagal menghapus admin." });
@@ -285,7 +428,6 @@ router.delete("/delete/:id", verifyAdmin, async (req, res) => {
 
 // ===================================
 // POST /api/admin/forgot-password
-// Public: admin kirim request lupa password + nomor WA
 // ===================================
 router.post("/forgot-password", async (req, res) => {
   try {
@@ -327,7 +469,6 @@ router.post("/forgot-password", async (req, res) => {
       });
     }
 
-    // ✅ INSERT sudah pakai kolom whatsapp
     await pool.execute(
       `INSERT INTO admin_password_resets (admin_id, identifier, whatsapp, reason)
        VALUES (?, ?, ?, ?)`,
@@ -346,7 +487,6 @@ router.post("/forgot-password", async (req, res) => {
 
 // ===================================
 // GET /api/admin/forgot-password/requests
-// Khusus superadmin: lihat semua request
 // ===================================
 router.get("/forgot-password/requests", verifyAdmin, async (req, res) => {
   try {
@@ -357,7 +497,6 @@ router.get("/forgot-password/requests", verifyAdmin, async (req, res) => {
       });
     }
 
-    // ✅ SELECT sudah mengikutkan identifier + whatsapp
     const [rows] = await pool.execute(`
       SELECT
         r.id,
@@ -385,7 +524,7 @@ router.get("/forgot-password/requests", verifyAdmin, async (req, res) => {
 
 // ===================================
 // PUT /api/admin/forgot-password/requests/:id/reset
-// Khusus superadmin: set password baru untuk admin yg request
+// (UPDATED: Send Email Notification)
 // ===================================
 router.put(
   "/forgot-password/requests/:id/reset",
@@ -401,11 +540,10 @@ router.put(
 
       const requestId = parseInt(req.params.id, 10);
       const { newPassword } = req.body;
+      const superAdminId = req.admin.id; // ID Superadmin yang sedang login
 
       if (!requestId) {
-        return res
-          .status(400)
-          .json({ message: "ID permintaan tidak valid." });
+        return res.status(400).json({ message: "ID permintaan tidak valid." });
       }
       if (!newPassword || newPassword.length < 6) {
         return res
@@ -413,10 +551,17 @@ router.put(
           .json({ message: "Password baru minimal 6 karakter." });
       }
 
+      // 1. Ambil Data Permintaan & Email Target
+      // Kita perlu join ke tabel admins untuk dapat email si pemohon (target)
       const [reqRows] = await pool.execute(
-        "SELECT * FROM admin_password_resets WHERE id = ? AND status = 'pending' LIMIT 1",
+        `SELECT r.*, a.email as target_email, a.username as target_username 
+         FROM admin_password_resets r
+         JOIN admins a ON a.id = r.admin_id
+         WHERE r.id = ? AND r.status = 'pending' 
+         LIMIT 1`,
         [requestId]
       );
+
       if (reqRows.length === 0) {
         return res.status(404).json({
           message: "Permintaan tidak ditemukan / sudah diproses.",
@@ -424,40 +569,102 @@ router.put(
       }
 
       const resetReq = reqRows[0];
+      const targetEmail = resetReq.target_email;
+      const targetUsername = resetReq.target_username;
 
+      // 2. Ambil Konfigurasi SMTP Superadmin (Pengirim)
+      const [smtpRows] = await pool.execute(
+        "SELECT * FROM smtp_settings WHERE admin_id = ? LIMIT 1",
+        [superAdminId]
+      );
+
+      if (smtpRows.length === 0) {
+        return res.status(400).json({
+          message:
+            "Gagal: Anda belum mengatur konfigurasi Email Pengirim. Silakan atur di menu 'Pengaturan Email' terlebih dahulu.",
+        });
+      }
+
+      const smtpConfig = smtpRows[0];
+
+      // 3. Konfigurasi Transporter Nodemailer
+      const transporter = nodemailer.createTransport({
+        service: smtpConfig.service || "gmail",
+        host: smtpConfig.host,
+        port: smtpConfig.port,
+        secure: smtpConfig.secure === 1, // Convert 1/0 to boolean
+        auth: {
+          user: smtpConfig.auth_user,
+          pass: smtpConfig.auth_pass,
+        },
+      });
+
+      // 4. Kirim Email
+      const emailContent = `
+        <div style="font-family: Arial, sans-serif; color: #333;">
+          <h2>Reset Password Berhasil</h2>
+          <p>Halo <b>${targetUsername}</b>,</p>
+          <p>Permintaan reset password Anda telah disetujui oleh Superadmin.</p>
+          <hr />
+          <p>Berikut adalah detail akun Anda yang baru:</p>
+          <ul>
+            <li><b>Username:</b> ${targetUsername}</li>
+            <li><b>Password Baru:</b> ${newPassword}</li>
+          </ul>
+          <p>Silakan segera login dan ganti password ini demi keamanan.</p>
+          <br />
+          <p>Salam,<br/>${smtpConfig.from_name || "Admin System"}</p>
+        </div>
+      `;
+
+      try {
+        await transporter.sendMail({
+          from: `"${smtpConfig.from_name || "Admin"}" <${smtpConfig.auth_user}>`,
+          to: targetEmail,
+          subject: "Informasi Reset Password Admin",
+          html: emailContent,
+        });
+      } catch (emailErr) {
+        console.error("Gagal kirim email reset:", emailErr);
+        return res.status(500).json({
+          message:
+            "Gagal mengirim email ke pemohon. Pastikan Password Aplikasi/SMTP Anda benar. Password belum diubah.",
+        });
+      }
+
+      // 5. Jika Email Berhasil, Update Database
       const salt = await bcrypt.genSalt(10);
       const newHash = await bcrypt.hash(newPassword, salt);
 
-      await pool.execute(
-        "UPDATE admins SET password_hash = ? WHERE id = ?",
-        [newHash, resetReq.admin_id]
-      );
+      // Update password di tabel admins
+      await pool.execute("UPDATE admins SET password_hash = ? WHERE id = ?", [
+        newHash,
+        resetReq.admin_id,
+      ]);
 
+      // Update status permintaan jadi resolved
       await pool.execute(
         `UPDATE admin_password_resets
          SET status = 'resolved',
              resolved_at = NOW(),
              resolved_by_admin_id = ?
          WHERE id = ?`,
-        [req.admin.id, requestId]
+        [superAdminId, requestId]
       );
 
       return res.json({
         message:
-          "Password admin berhasil direset dan permintaan ditandai selesai.",
+          `Password berhasil direset dan email notifikasi telah dikirim ke ${targetEmail}.`,
       });
     } catch (err) {
       console.error("Error reset by superadmin:", err);
-      return res
-        .status(500)
-        .json({ message: "Gagal reset password admin." });
+      return res.status(500).json({ message: "Gagal reset password admin." });
     }
   }
 );
 
 // ===================================
 // POST /api/admin/register
-// (Tetap seperti file kamu)
 // ===================================
 router.post("/register", verifyAdmin, async (req, res) => {
   try {
@@ -491,8 +698,8 @@ router.post("/register", verifyAdmin, async (req, res) => {
     const password_hash = await bcrypt.hash(password, salt);
 
     const sql = `
-      INSERT INTO admins (username, email, password_hash, role, created_by_admin_id) 
-      VALUES (?, ?, ?, ?, ?)
+      INSERT INTO admins (username, email, password_hash, role, created_by_admin_id, is_active) 
+      VALUES (?, ?, ?, ?, ?, 1)
     `;
 
     await pool.execute(sql, [
@@ -515,6 +722,10 @@ router.post("/register", verifyAdmin, async (req, res) => {
 
     return res.status(500).json({ message: "Terjadi kesalahan server." });
   }
+});
+
+router.get("/ping", verifyAdmin, (req, res) => {
+  res.json({ ok: true });
 });
 
 module.exports = router;

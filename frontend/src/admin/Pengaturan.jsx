@@ -1,4 +1,4 @@
-// File: src/admin/Pengaturan.jsx (DIPERBARUI - Manajemen Admin dihapus)
+// File: src/admin/Pengaturan.jsx
 
 import React, { useState, useEffect, useCallback } from "react";
 import {
@@ -178,16 +178,22 @@ const Pengaturan = () => {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-white to-gray-50">
-      {/* Header Page */}
-      <div className="bg-white shadow-sm border-b border-gray-300 px-8 py-5 sticky top-0 z-50">
-        <div className="flex items-center gap-2">
-          <FaCog className="text-blue-600 w-6 h-6" />
-          <h2 className="text-2xl font-semibold text-gray-900">Pengaturan</h2>
-        </div>
+    <div className="min-h-screen bg-gray-50 flex flex-col pb-10">
+      
+      {/* ===========================
+          NAVBAR (Sticky Top)
+      ============================ */}
+      <div className="bg-white shadow-sm border-b border-gray-300 py-4 pl-14 pr-4 md:px-8 md:py-5 sticky top-0 z-50 flex items-center gap-3 transition-all">
+        {/* Icon disembunyikan di mobile (hidden), hanya muncul di md ke atas */}
+        <span className="hidden md:inline-block">
+          <FaCog className="text-blue-600 w-5 h-5 md:w-6 md:h-6" />
+        </span>
+        <h2 className="text-xl md:text-2xl font-semibold text-gray-900">
+          Pengaturan
+        </h2>
       </div>
 
-      <div className="p-6">
+      <div className="p-4 md:p-6 lg:p-8">
         <PageAlert {...msg} onClose={() => setMsg({ type: "", text: "" })} />
 
         {/* ========================================= */}
@@ -298,28 +304,31 @@ const Pengaturan = () => {
                 </div>
               </div>
 
-              {/* Bar aksi (global) */}
-              <div className="mt-6 flex items-center justify-end gap-3">
+              {/* Bar aksi (Responsive) */}
+              <div className="mt-8 flex flex-col-reverse sm:flex-row items-center justify-end gap-3 border-t pt-5 border-gray-100">
+                {/* Tombol Reset */}
                 <button
                   type="button"
                   onClick={fetchSettings}
                   disabled={isSaving}
-                  className="px-5 py-2.5 rounded-xl border border-gray-300 text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+                  className="w-full sm:w-auto px-5 py-2.5 rounded-xl border border-gray-300 text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50 font-medium transition text-sm sm:text-base"
                   title="Batalkan perubahan (muat ulang dari server)"
                 >
                   Reset
                 </button>
+
+                {/* Tombol Simpan */}
                 <button
                   type="submit"
                   disabled={isSaving}
-                  className="inline-flex items-center justify-center gap-2 px-5 py-2.5 bg-indigo-600 text-white font-semibold rounded-xl hover:bg-indigo-700 transition disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-5 py-2.5 bg-indigo-600 text-white font-semibold rounded-xl hover:bg-indigo-700 transition disabled:opacity-50 disabled:cursor-not-allowed shadow-md shadow-indigo-200 text-sm sm:text-base"
                 >
                   {isSaving ? (
                     <FaSpinner className="animate-spin" />
                   ) : (
                     <FaCheckCircle />
                   )}
-                  {isSaving ? "Menyimpan..." : "Simpan Perubahan Tampilan"}
+                  {isSaving ? "Menyimpan..." : "Simpan Perubahan"}
                 </button>
               </div>
             </form>

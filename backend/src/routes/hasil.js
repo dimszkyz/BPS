@@ -1,11 +1,57 @@
+// File: src/routes/hasil.js
+
 const express = require("express");
 const router = express.Router();
 const pool = require("../db");
 const verifyAdmin = require("../middleware/verifyAdmin");
+const multer = require("multer");
+const path = require("path");
+const fs = require("fs");
 
 // =======================================================
-// POST - SIMPAN DRAFT (AUTOSAVE BERKALA / SAAT TAB DITUTUP)
-// Endpoint: POST /api/hasil/draft
+// MULTER SETUP UNTUK JAWABAN DOKUMEN (UPLOAD FILE PESERTA)
+// Folder: /uploads_jawaban
+// =======================================================
+const uploadJawabanDir = path.join(__dirname, "../uploads_jawaban");
+if (!fs.existsSync(uploadJawabanDir)) {
+  fs.mkdirSync(uploadJawabanDir, { recursive: true });
+}
+
+const storageJawaban = multer.diskStorage({
+  destination: (req, file, cb) => cb(null, uploadJawabanDir),
+  filename: (req, file, cb) => {
+    const unique = Date.now() + "-" + Math.round(Math.random() * 1e9);
+    cb(null, unique + path.extname(file.originalname));
+  },
+});
+
+const upload = multer({ storage: storageJawaban });
+
+// =======================================================
+// HELPER: Normalisasi jawaban dokumen dari DB
+// =======================================================
+const normalizeDokumenJawaban = (jawaban_text) => {
+  if (!jawaban_text) return { first: null, files: [] };
+
+  if (typeof jawaban_text === "string") {
+    try {
+      const parsed = JSON.parse(jawaban_text);
+      if (Array.isArray(parsed)) {
+        return {
+          first: parsed[0] || null,
+          files: parsed,
+        };
+      }
+    } catch (_) {
+      // bukan JSON, anggap single path
+    }
+  }
+
+  return { first: jawaban_text, files: [jawaban_text] };
+};
+
+// =======================================================
+// POST - SIMPAN DRAFT (AUTOSAVE)
 // =======================================================
 router.post("/draft", async (req, res) => {
   let conn;
@@ -55,13 +101,13 @@ router.post("/draft", async (req, res) => {
 });
 
 // =======================================================
-// POST - SIMPAN HASIL FINAL (MANUAL / AUTO SUBMIT TIMER HABIS)
-// Endpoint: POST /api/hasil
+// POST - SIMPAN HASIL FINAL (SUBMIT)
 // =======================================================
-router.post("/", async (req, res) => {
+router.post("/", upload.any(), async (req, res) => {
   let conn;
   try {
-    const { peserta_id, exam_id, jawaban } = req.body;
+    const bodyData = req.body.data ? JSON.parse(req.body.data) : req.body;
+    const { peserta_id, exam_id, jawaban } = bodyData;
 
     // Validasi input
     if (!peserta_id || !exam_id || !Array.isArray(jawaban)) {
@@ -75,39 +121,57 @@ router.post("/", async (req, res) => {
       if (!j.question_id) continue;
 
       let benar = false;
-      let jawabanTextFinal = j.jawaban_text; // teks esai, atau id opsi
+      let jawabanTextFinal = j.jawaban_text;
 
-      if (j.tipe_soal === "pilihanGanda" && j.jawaban_text) {
+      const { question_id, tipe_soal } = j;
+
+      // --- Tipe Soal Dokumen ---
+      if (tipe_soal === "soalDokumen") {
+        const files =
+          req.files?.filter(
+            (x) => x.fieldname === `dokumen_${question_id}`
+          ) || [];
+
+        if (files.length > 0) {
+          const paths = files.map((f) => `/uploads_jawaban/${f.filename}`);
+          jawabanTextFinal = JSON.stringify(paths);
+        } else {
+          jawabanTextFinal = j.jawaban_text ?? null;
+        }
+        benar = false; // penilaian manual
+      }
+
+      // --- Pilihan Ganda ---
+      else if (tipe_soal === "pilihanGanda" && j.jawaban_text) {
         const optionId = parseInt(j.jawaban_text, 10);
-
         if (!isNaN(optionId)) {
           const [opsi] = await conn.execute(
             "SELECT is_correct, opsi_text FROM options WHERE id = ? LIMIT 1",
             [optionId]
           );
-
           if (opsi.length > 0) {
             benar = !!opsi[0].is_correct;
-            jawabanTextFinal = opsi[0].opsi_text; // simpan teks opsi
+            jawabanTextFinal = opsi[0].opsi_text;
           } else {
             jawabanTextFinal = null;
           }
         } else {
           jawabanTextFinal = null;
         }
-      } else if (j.tipe_soal === "teksSingkat" && j.jawaban_text) {
+      }
+
+      // --- Teks Singkat ---
+      else if (tipe_soal === "teksSingkat" && j.jawaban_text) {
         const [kunci] = await conn.execute(
           "SELECT opsi_text FROM options WHERE question_id = ? AND is_correct = 1 LIMIT 1",
-          [j.question_id]
+          [question_id]
         );
 
         if (kunci.length > 0) {
           const jawabanBenarString = kunci[0].opsi_text || "";
           const jawabanUser = j.jawaban_text || "";
-
           const normUser = jawabanUser.replace(/\s+/g, "").toLowerCase();
           const listKunciBenar = jawabanBenarString.split(",");
-
           const normListKunci = listKunciBenar.map((k) =>
             k.replace(/\s+/g, "").toLowerCase()
           );
@@ -116,11 +180,14 @@ router.post("/", async (req, res) => {
             benar = true;
           }
         }
-      } else if (j.tipe_soal === "esay") {
-        // Esai -> penilaian manual, benar tetap false
       }
 
-      // 💾 Simpan hasil FINAL (UPSERT biar update kalau sebelumnya draft sudah ada)
+      // --- Esai ---
+      else if (tipe_soal === "esay") {
+        // penilaian manual
+      }
+
+      // 💾 Simpan hasil FINAL
       await conn.execute(
         `
         INSERT INTO hasil_ujian
@@ -131,7 +198,7 @@ router.post("/", async (req, res) => {
           benar = VALUES(benar),
           created_at = NOW()
         `,
-        [peserta_id, exam_id, j.question_id, jawabanTextFinal, benar]
+        [peserta_id, exam_id, question_id, jawabanTextFinal, benar]
       );
     }
 
@@ -155,11 +222,7 @@ router.post("/", async (req, res) => {
 });
 
 // =======================================================
-// GET - Ambil semua hasil ujian (rekap detail, untuk admin page)
-// Endpoint: GET /api/hasil
-// Superadmin:
-//   - tanpa target_admin_id -> lihat semua
-//   - dengan target_admin_id -> lihat admin tertentu
+// GET - Ambil semua hasil ujian (Rekap List)
 // =======================================================
 router.get("/", verifyAdmin, async (req, res) => {
   try {
@@ -174,7 +237,7 @@ router.get("/", verifyAdmin, async (req, res) => {
         whereClause = "WHERE e.admin_id = ?";
         params = [target_admin_id];
       } else {
-        whereClause = "WHERE 1=1"; // superadmin lihat semua hasil
+        whereClause = "WHERE 1=1";
         params = [];
       }
     }
@@ -189,6 +252,7 @@ router.get("/", verifyAdmin, async (req, res) => {
         q.id AS question_id,
         q.soal_text,
         q.tipe_soal,
+        q.bobot,  -- <--- UPDATE DISINI: Menambahkan kolom bobot agar frontend bisa menghitung nilai akurat
         h.jawaban_text,
         h.benar,
         h.created_at,
@@ -207,7 +271,19 @@ router.get("/", verifyAdmin, async (req, res) => {
       params
     );
 
-    return res.json(rows);
+    const normalized = rows.map((r) => {
+      if (r.tipe_soal === "soalDokumen") {
+        const { first, files } = normalizeDokumenJawaban(r.jawaban_text);
+        return {
+          ...r,
+          jawaban_text: first,
+          jawaban_files: files,
+        };
+      }
+      return r;
+    });
+
+    return res.json(normalized);
   } catch (err) {
     console.error("Error GET /api/hasil:", err);
     return res.status(500).json({ message: "Gagal memuat rekap hasil" });
@@ -215,11 +291,7 @@ router.get("/", verifyAdmin, async (req, res) => {
 });
 
 // =======================================================
-// GET - Ambil semua hasil detail untuk SATU PESERTA
-// Endpoint: GET /api/hasil/peserta/:peserta_id
-// Superadmin:
-//   - tanpa target_admin_id -> lihat semua hasil peserta di semua ujian
-//   - dengan target_admin_id -> filter ujian admin tertentu
+// GET - Detail Hasil Peserta (FIXED: Added h.exam_id)
 // =======================================================
 router.get("/peserta/:peserta_id", verifyAdmin, async (req, res) => {
   let conn;
@@ -236,22 +308,25 @@ router.get("/peserta/:peserta_id", verifyAdmin, async (req, res) => {
         whereClause = "AND e.admin_id = ?";
         params = [peserta_id, target_admin_id];
       } else {
-        whereClause = ""; // superadmin lihat semua ujian peserta
+        whereClause = "";
         params = [peserta_id];
       }
     }
 
     conn = await pool.getConnection();
 
+    // Query sudah benar (sudah ada q.bobot)
     const [rows] = await conn.execute(
       `
       SELECT 
         q.id AS question_id,
         q.soal_text,
         q.tipe_soal,
+        q.bobot,
         h.jawaban_text,
         h.benar,
         h.created_at,
+        h.exam_id,               
         e.keterangan AS keterangan_ujian,
         e.admin_id 
       FROM hasil_ujian h
@@ -267,12 +342,10 @@ router.get("/peserta/:peserta_id", verifyAdmin, async (req, res) => {
     if (rows.length === 0) {
       conn.release();
       return res.status(404).json({
-        message:
-          "Hasil ujian tidak ditemukan untuk peserta ini (atau Anda tidak memiliki akses).",
+        message: "Hasil ujian tidak ditemukan untuk peserta ini.",
       });
     }
 
-    // Tambah detail opsi untuk PG & Teks Singkat
     for (const row of rows) {
       if (row.tipe_soal === "pilihanGanda" || row.tipe_soal === "teksSingkat") {
         const [options] = await conn.execute(
@@ -286,6 +359,12 @@ router.get("/peserta/:peserta_id", verifyAdmin, async (req, res) => {
       } else {
         row.pilihan = [];
       }
+
+      if (row.tipe_soal === "soalDokumen") {
+        const { first, files } = normalizeDokumenJawaban(row.jawaban_text);
+        row.jawaban_text = first;
+        row.jawaban_files = files;
+      }
     }
 
     conn.release();
@@ -297,6 +376,35 @@ router.get("/peserta/:peserta_id", verifyAdmin, async (req, res) => {
       message: "Gagal memuat hasil detail",
       error: err.message,
     });
+  }
+});
+
+// =======================================================
+// PUT - NILAI MANUAL (BENAR/SALAH)
+// =======================================================
+router.put("/nilai-manual", verifyAdmin, async (req, res) => {
+  try {
+    const { peserta_id, exam_id, question_id, benar } = req.body;
+
+    // Validasi sederhana
+    if (!peserta_id || !exam_id || !question_id) {
+      return res.status(400).json({ message: "Parameter tidak lengkap (peserta_id, exam_id, question_id)." });
+    }
+
+    // Konversi benar ke integer (1 atau 0)
+    const statusBenar = (benar === true || benar === 1 || benar === "1") ? 1 : 0;
+
+    await pool.execute(
+      `UPDATE hasil_ujian 
+       SET benar = ? 
+       WHERE peserta_id = ? AND exam_id = ? AND question_id = ?`,
+      [statusBenar, peserta_id, exam_id, question_id]
+    );
+
+    return res.json({ message: "Status nilai berhasil diperbarui.", status: statusBenar });
+  } catch (err) {
+    console.error("Error nilai manual:", err);
+    return res.status(500).json({ message: "Gagal memperbarui nilai." });
   }
 });
 

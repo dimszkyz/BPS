@@ -8,10 +8,42 @@ import {
   FaCheck,
   FaListUl,
   FaTrashAlt,
-  FaSpinner
+  FaSpinner,
+  FaExclamationTriangle // Tambahan icon untuk modal
 } from "react-icons/fa";
 
 const API_URL = "http://localhost:5000";
+
+// --- KOMPONEN MODAL KONFIRMASI (Sama seperti di TabUjianAdmin) ---
+const KonfirmasiModal = ({ show, message, onCancel, onConfirm }) => {
+  if (!show) return null;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-[1px]">
+      <div className="bg-white p-6 rounded-lg shadow-xl w-full max-w-sm animate-in fade-in zoom-in duration-200">
+        <div className="flex items-center gap-3 mb-4">
+          <FaExclamationTriangle className="text-yellow-500 text-2xl" />
+          <h3 className="text-lg font-semibold text-gray-800">Konfirmasi</h3>
+        </div>
+        <p className="text-gray-700 mb-6 whitespace-pre-line">{message}</p>
+        <div className="flex justify-end gap-3">
+          <button
+            onClick={onCancel}
+            className="px-4 py-2 rounded-md bg-gray-200 text-gray-800 font-semibold hover:bg-gray-300 transition"
+          >
+            Batal
+          </button>
+          <button
+            onClick={onConfirm}
+            className="px-4 py-2 rounded-md bg-red-600 text-white font-semibold hover:bg-red-700 transition"
+          >
+            Ya, Batalkan
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
 
 const TabUndanganAdmin = ({ adminId }) => {
   const [groupedInvitations, setGroupedInvitations] = useState({});
@@ -19,6 +51,13 @@ const TabUndanganAdmin = ({ adminId }) => {
   const [error, setError] = useState("");
   const [copiedCode, setCopiedCode] = useState(null);
   const [deletingId, setDeletingId] = useState(null);
+
+  // --- State untuk Modal Konfirmasi ---
+  const [modalState, setModalState] = useState({
+    show: false,
+    message: "",
+    data: null, // Menyimpan ID dan Email sementara
+  });
 
   // --- Fetch Data ---
   const fetchData = useCallback(async () => {
@@ -80,15 +119,31 @@ const TabUndanganAdmin = ({ adminId }) => {
     );
   };
 
-  // --- Cancel/Delete Handler ---
-  const handleCancelInvitation = async (invitationId, email) => {
-    if (!window.confirm(`Sebagai Super Admin, apakah Anda yakin ingin membatalkan undangan untuk ${email}? \nPeserta tidak akan bisa login lagi.`)) {
-      return;
-    }
-    setDeletingId(invitationId);
+  // --- MODAL HANDLERS ---
+  const openDeleteModal = (invitationId, email) => {
+    setModalState({
+      show: true,
+      message: `Sebagai Super Admin, apakah Anda yakin ingin membatalkan undangan untuk ${email}? \n\nPeserta tidak akan bisa login lagi.`,
+      data: { id: invitationId }
+    });
+  };
+
+  const closeDeleteModal = () => {
+    setModalState({ show: false, message: "", data: null });
+  };
+
+  // --- EKSEKUSI HAPUS (Dipanggil setelah konfirmasi modal) ---
+  const confirmDelete = async () => {
+    if (!modalState.data) return;
+    const { id } = modalState.data;
+    
+    // Tutup modal dulu
+    closeDeleteModal();
+    setDeletingId(id);
+
     try {
       const token = sessionStorage.getItem("adminToken");
-      const response = await fetch(`${API_URL}/api/invite/${invitationId}`, {
+      const response = await fetch(`${API_URL}/api/invite/${id}`, {
         method: "DELETE",
         headers: { Authorization: `Bearer ${token}` }
       });
@@ -97,7 +152,7 @@ const TabUndanganAdmin = ({ adminId }) => {
       // Refresh data setelah hapus
       fetchData();
     } catch (err) {
-      alert(`Gagal: ${err.message}`);
+      alert(`Gagal: ${err.message}`); // Bisa diganti toast jika mau
     } finally {
       setDeletingId(null);
     }
@@ -144,8 +199,15 @@ const TabUndanganAdmin = ({ adminId }) => {
   }
 
   return (
-    // [UBAH] Menghapus class 'animate-in fade-in ...' agar tidak ada efek fade
     <div className="space-y-8">
+      {/* Render Modal Konfirmasi */}
+      <KonfirmasiModal 
+        show={modalState.show}
+        message={modalState.message}
+        onCancel={closeDeleteModal}
+        onConfirm={confirmDelete}
+      />
+
       {Object.entries(groupedInvitations).map(([examId, groupData]) => (
         <div key={examId} className="border border-gray-200 rounded-lg overflow-hidden shadow-sm bg-white">
           {/* Group Header */}
@@ -161,9 +223,8 @@ const TabUndanganAdmin = ({ adminId }) => {
             <table className="min-w-full text-sm text-left">
               <thead className="bg-gray-50 text-gray-500 uppercase text-xs tracking-wider font-semibold">
                 <tr>
-                  {/* [UBAH] Penyesuaian lebar kolom untuk mengakomodasi kolom baru */}
                   <th className="py-3 px-4 w-[25%]">Email Peserta</th>
-                  <th className="py-3 px-4 w-[20%]">Nama Ujian</th> {/* Kolom Baru */}
+                  <th className="py-3 px-4 w-[20%]">Nama Ujian</th>
                   <th className="py-3 px-4 w-[15%]">Kode Login</th>
                   <th className="py-3 px-4 w-[10%] text-center">Batas</th>
                   <th className="py-3 px-4 w-[20%]">Waktu Kirim</th>
@@ -179,7 +240,7 @@ const TabUndanganAdmin = ({ adminId }) => {
                       {invite.email}
                     </td>
 
-                    {/* [BARU] Kolom Nama Ujian */}
+                    {/* Nama Ujian */}
                     <td className="py-3 px-4 text-gray-600 text-xs align-middle">
                       {invite.keterangan_ujian || "-"}
                     </td>
@@ -216,10 +277,10 @@ const TabUndanganAdmin = ({ adminId }) => {
                       {formatTanggal(invite.sent_at)}
                     </td>
 
-                    {/* Tombol Hapus / Batalkan */}
+                    {/* Tombol Hapus / Batalkan (UPDATED: MENGGUNAKAN MODAL) */}
                     <td className="py-3 px-4 text-center align-middle">
                       <button
-                        onClick={() => handleCancelInvitation(invite.id, invite.email)}
+                        onClick={() => openDeleteModal(invite.id, invite.email)}
                         disabled={deletingId === invite.id}
                         className={`p-2 rounded-lg transition-all ${
                           deletingId === invite.id 

@@ -80,15 +80,17 @@ const LoginAdmin = () => {
 
       if (!res.ok) throw new Error(data.message || "Gagal login.");
 
-      // Sukses: Simpan ke sessionStorage dan navigasi
+      sessionStorage.clear(); 
+      localStorage.clear(); 
+
       sessionStorage.setItem("adminToken", data.token);
       sessionStorage.setItem("adminData", JSON.stringify(data.admin));
-      navigate("/admin/dashboard");
-
-      // JANGAN set loading false di sini, biarkan komponen unmount
+      
+      setTimeout(() => {
+        navigate("/admin/dashboard");
+      }, 100);
       
     } catch (err) {
-      // Gagal: Tangani error, reset captcha, DAN set loading false
       console.error(err);
       setErrMsg(err.message || "Terjadi kesalahan saat login.");
       if (recaptchaRef.current) {

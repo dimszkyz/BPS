@@ -8,18 +8,30 @@ const pool = require("../db");
 const verifyAdmin = require("../middleware/verifyAdmin");
 
 // --- FUNGSI BARU: Dapatkan Transporter Dinamis dari DB ---
-async function getTransporter() {
-  const [rows] = await pool.execute("SELECT * FROM smtp_settings WHERE id = 1");
+// Dapatkan transporter berdasar admin yang login
+async function getTransporter(adminId) {
+  const [rows] = await pool.execute(
+    `SELECT service, host, port, secure, auth_user, auth_pass, from_name
+     FROM smtp_settings
+     WHERE admin_id = ? 
+     LIMIT 1`,
+    [adminId]
+  );
+
   if (rows.length === 0) {
-    throw new Error("Konfigurasi email belum diatur di Admin.");
+    throw new Error(
+      "Konfigurasi email pengirim belum diatur. Silakan buka menu Pengaturan Email terlebih dahulu."
+    );
   }
+
   const config = rows[0];
 
   if (!config.auth_user || !config.auth_pass) {
-    throw new Error("Email pengirim atau password belum diatur di Admin.");
+    throw new Error(
+      "Email pengirim atau password aplikasi belum diatur. Silakan lengkapi pengaturan email terlebih dahulu."
+    );
   }
 
-  // Buat transporter Nodemailer baru berdasarkan data DB
   return nodemailer.createTransport({
     service: config.service === "gmail" ? "gmail" : undefined,
     host: config.service !== "gmail" ? config.host : undefined,
@@ -32,16 +44,26 @@ async function getTransporter() {
   });
 }
 
-// --- HELPER: Dapatkan Nama Pengirim ---
-async function getSenderIdentity() {
+// Ambil identitas "From" berdasar admin yang login
+async function getSenderIdentity(adminId) {
   const [rows] = await pool.execute(
-    "SELECT auth_user, from_name FROM smtp_settings WHERE id = 1"
+    `SELECT auth_user, from_name 
+     FROM smtp_settings 
+     WHERE admin_id = ? 
+     LIMIT 1`,
+    [adminId]
   );
+
   if (rows.length > 0 && rows[0].auth_user) {
     return `"${rows[0].from_name || "Admin Ujian"}" <${rows[0].auth_user}>`;
   }
-  return `"Admin Ujian" <noreply@example.com>`;
+  throw new Error(
+    "Konfigurasi email pengirim belum diatur. Silakan buka menu Pengaturan Email terlebih dahulu."
+  );
 }
+
+
+
 
 // Fungsi untuk membuat kode acak
 function createRandomCode(length = 6) {
@@ -59,7 +81,7 @@ function createRandomCode(length = 6) {
 router.post("/", verifyAdmin, async (req, res) => {
   let connection;
   try {
-    // 1. Ambil data admin (dari token) dan data body
+    
     const { id: loggedInAdminId, role: adminRole } = req.admin;
     const { pesan, emails, exam_id, max_logins } = req.body;
 
@@ -74,9 +96,8 @@ router.post("/", verifyAdmin, async (req, res) => {
       }
     }
     
-    // 3. SIAPKAN TRANSPORTER (agar gagal cepat jika config salah)
-    const currentTransporter = await getTransporter();
-    const senderIdentity = await getSenderIdentity();
+    const currentTransporter = await getTransporter(loggedInAdminId);
+const senderIdentity = await getSenderIdentity(loggedInAdminId);
 
     // 4. Validasi Input
     if (!exam_id) {
@@ -238,11 +259,15 @@ await connection.execute(
     console.error("Error tidak terduga di /api/invite:", error);
     if (connection) await connection.rollback();
     if (
-      error.message.includes("Konfigurasi email belum diatur") ||
-      error.message.includes("Email pengirim atau password belum diatur")
+      error.message.includes("Konfigurasi email") || 
+      error.message.includes("Email pengirim")
     ) {
-      return res.status(400).json({ message: error.message });
+      // Kita kembalikan pesan yang diminta user
+      return res.status(400).json({ 
+        message: "Pengaturan email belum diisi. Silakan lengkapi konfigurasi terlebih dahulu." 
+      });
     }
+
     res.status(500).json({
       message: "Terjadi kesalahan server saat memproses undangan.",
     });

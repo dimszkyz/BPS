@@ -89,7 +89,7 @@ const PermintaanResetPassword = () => {
   const [fetchErr, setFetchErr] = useState("");
 
   const [search, setSearch] = useState("");
-  const [filterStatus, setFilterStatus] = useState("pending");
+  const [filterStatus, setFilterStatus] = useState("all");
 
   const [expandedId, setExpandedId] = useState(null);
   const [newPw, setNewPw] = useState("");
@@ -239,10 +239,11 @@ const PermintaanResetPassword = () => {
             onChange={(e) => setFilterStatus(e.target.value)}
             className="md:w-48 w-full py-2 px-3 border border-gray-300 rounded-xl bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
           >
+            <option value="all">Semua</option>
             <option value="pending">Pending</option>
             <option value="resolved">Selesai</option>
             {/* <option value="rejected">Ditolak</option> */}
-            <option value="all">Semua</option>
+            
           </select>
         </div>
 

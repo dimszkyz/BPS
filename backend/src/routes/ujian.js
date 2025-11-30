@@ -1,3 +1,5 @@
+// File: src/routes/ujian.js
+
 const verifyAdmin = require("../middleware/verifyAdmin");
 const express = require("express");
 const router = express.Router();
@@ -6,12 +8,19 @@ const multer = require("multer");
 const path = require("path");
 const fs = require("fs");
 
+// --- SETUP FOLDER UPLOAD ---
 const uploadDir = path.join(__dirname, "../uploads");
 if (!fs.existsSync(uploadDir)) {
   fs.mkdirSync(uploadDir, { recursive: true });
 }
 
-// Setup multer untuk simpan file gambar
+// --- SETUP FOLDER JAWABAN PESERTA (BARU) ---
+const uploadJawabanDir = path.join(__dirname, "../uploads_jawaban");
+if (!fs.existsSync(uploadJawabanDir)) {
+  fs.mkdirSync(uploadJawabanDir, { recursive: true });
+}
+
+// 1. Multer untuk Gambar Soal (Admin)
 const storage = multer.diskStorage({
   destination: (req, file, cb) => cb(null, uploadDir),
   filename: (req, file, cb) => {
@@ -21,10 +30,21 @@ const storage = multer.diskStorage({
 });
 const upload = multer({ storage });
 
-// Serve file gambar statis agar bisa diakses frontend
-router.use("/uploads", express.static(uploadDir));
+// 2. Multer Khusus Jawaban Peserta (Public Upload)
+const storageJawaban = multer.diskStorage({
+  destination: (req, file, cb) => cb(null, uploadJawabanDir),
+  filename: (req, file, cb) => {
+    const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
+    cb(null, uniqueSuffix + path.extname(file.originalname));
+  },
+});
+const uploadJawaban = multer({ storage: storageJawaban });
 
-// Helper untuk parsing body fleksibel (multipart/form-data atau JSON)
+// Serve file statis
+router.use("/uploads", express.static(uploadDir));
+router.use("/uploads_jawaban", express.static(uploadJawabanDir));
+
+// Helper parsing body
 function parseBodyData(req) {
   if (req.body && typeof req.body.data === "string") {
     try {
@@ -46,8 +66,21 @@ function toBool(v) {
   return v === true || v === 1 || v === "1" || v === "true" || v === "on";
 }
 
+// ==========================================
+// 🔴 ROUTE BARU: UPLOAD JAWABAN PESERTA
+// ==========================================
+// Endpoint ini dipanggil oleh frontend saat peserta memilih file
+router.post("/upload-peserta", uploadJawaban.single("file"), (req, res) => {
+  if (!req.file) {
+    return res.status(400).json({ message: "Tidak ada file yang diupload." });
+  }
+  // Kembalikan path file agar frontend bisa menyimpannya sebagai jawaban
+  const filePath = `/uploads_jawaban/${req.file.filename}`;
+  return res.json({ filePath, originalName: req.file.originalname });
+});
+
 // ====================
-// POST - Simpan ujian baru
+// POST - Simpan ujian baru (Admin)
 // ====================
 router.post("/", verifyAdmin, upload.any(), async (req, res) => {
   const bodyData = parseBodyData(req);
@@ -60,7 +93,7 @@ router.post("/", verifyAdmin, upload.any(), async (req, res) => {
     durasi,
     soalList,
     acakSoal,
-    acakOpsi, // NEW
+    acakOpsi,
   } = bodyData;
 
   if (
@@ -93,7 +126,7 @@ router.post("/", verifyAdmin, upload.any(), async (req, res) => {
         jamMulai,
         jamBerakhir,
         toBool(acakSoal) ? 1 : 0,
-        toBool(acakOpsi) ? 1 : 0, // NEW
+        toBool(acakOpsi) ? 1 : 0,
         parseInt(durasi, 10) || 0,
         loggedInAdminId,
       ]
@@ -109,9 +142,21 @@ router.post("/", verifyAdmin, upload.any(), async (req, res) => {
           : null;
       const gambarPath = file ? `/uploads/${file.filename}` : gambarFromBody;
 
+      // --- LOGIKA BARU: SIAPKAN JSON CONFIG UNTUK SOAL DOKUMEN ---
+      let fileConfigJSON = null;
+      if (s.tipeSoal === "soalDokumen") {
+        fileConfigJSON = JSON.stringify({
+          allowedTypes: s.allowedTypes || [], // Array, misal: ['.pdf', '.docx']
+          maxSize: s.maxSize || 5,            // MB
+          maxCount: s.maxCount || 1           // Jumlah file
+        });
+      }
+      // -----------------------------------------------------------
+
+      const bobotSoal = parseInt(s.bobot) || 1; // Default bobot 1 jika kosong
       const [qRes] = await conn.execute(
-        "INSERT INTO questions (exam_id, tipe_soal, soal_text, gambar) VALUES (?, ?, ?, ?)",
-        [examId, s.tipeSoal || "", s.soalText || "", gambarPath]
+        "INSERT INTO questions (exam_id, tipe_soal, soal_text, gambar, file_config, bobot) VALUES (?, ?, ?, ?, ?, ?)",
+        [examId, s.tipeSoal || "", s.soalText || "", gambarPath, fileConfigJSON, bobotSoal]
       );
       const qId = qRes.insertId;
 
@@ -146,7 +191,7 @@ router.post("/", verifyAdmin, upload.any(), async (req, res) => {
     if (conn) {
       try {
         await conn.rollback();
-      } catch {}
+      } catch { }
     }
     console.error("POST /api/ujian error:", err);
     return res
@@ -293,20 +338,37 @@ router.get("/public/:id", async (req, res) => {
 
     const ujian = ujianRows[0];
 
+    // Ambil kolom file_config juga
     const [soalRows] = await pool.execute(
-      "SELECT id, tipe_soal AS tipeSoal, soal_text AS soalText, gambar FROM questions WHERE exam_id = ?",
+      "SELECT id, tipe_soal AS tipeSoal, soal_text AS soalText, gambar, file_config FROM questions WHERE exam_id = ?",
       [id]
     );
 
-    for (let s of soalRows) {
+    // Parsing config untuk publik (jika perlu validasi di frontend user)
+    const processedSoalList = soalRows.map(s => {
+      let config = {};
+      try {
+        if (s.file_config) config = typeof s.file_config === 'string' ? JSON.parse(s.file_config) : s.file_config;
+      } catch (e) { }
+
+      return {
+        ...s,
+        fileConfig: config, // kirim ke frontend public
+        pilihan: []
+      };
+    });
+
+    for (let s of processedSoalList) {
       const [opsiRows] = await pool.execute(
         "SELECT id, opsi_text AS text, is_correct AS isCorrect FROM options WHERE question_id = ?",
         [s.id]
       );
       s.pilihan = opsiRows;
+      // Hapus raw file_config agar tidak double (opsional)
+      delete s.file_config;
     }
 
-    return res.json({ ...ujian, soalList: soalRows });
+    return res.json({ ...ujian, soalList: processedSoalList });
   } catch (err) {
     console.error("Error GET /api/ujian/public/:id:", err);
     res.status(500).json({ message: "Gagal mengambil data ujian publik." });
@@ -314,7 +376,7 @@ router.get("/public/:id", async (req, res) => {
 });
 
 // ====================
-// GET - Detail ujian berdasarkan ID
+// GET - Detail ujian berdasarkan ID (ADMIN - UNTUK EDIT)
 // ====================
 router.get("/:id", verifyAdmin, async (req, res) => {
   const { id } = req.params;
@@ -353,24 +415,40 @@ router.get("/:id", verifyAdmin, async (req, res) => {
       tanggal: ujian.tanggal,
       tanggal_berakhir: ujian.tanggal_berakhir,
       jam_mulai: ujian.jam_mulai,
-      jam_berakhir: ujian.jam_berakhir, // FIX/ADD
+      jam_berakhir: ujian.jam_berakhir,
       acak_soal: !!ujian.acak_soal,
-      acak_opsi: !!ujian.acak_opsi, // NEW
+      acak_opsi: !!ujian.acak_opsi,
       durasi: ujian.durasi,
-      soalList: soalRows.map((s) => ({
-        id: s.id,
-        tipeSoal: s.tipe_soal,
-        soalText: s.soal_text,
-        gambar: s.gambar || null,
-        pilihan:
-          s.tipe_soal === "pilihanGanda" || s.tipe_soal === "teksSingkat"
-            ? s.pilihan.map((p) => ({
+      soalList: soalRows.map((s) => {
+        // --- PARSING JSON CONFIG ---
+        let config = {};
+        if (s.file_config) {
+          try {
+            config = typeof s.file_config === 'string' ? JSON.parse(s.file_config) : s.file_config;
+          } catch (e) { config = {} }
+        }
+        // ---------------------------
+
+        return {
+          id: s.id,
+          tipeSoal: s.tipe_soal,
+          bobot: s.bobot,
+          soalText: s.soal_text,
+          gambar: s.gambar || null,
+          // Kembalikan config ke frontend agar form terisi
+          allowedTypes: config.allowedTypes || [],
+          maxSize: config.maxSize || 5,
+          maxCount: config.maxCount || 1,
+          pilihan:
+            s.tipe_soal === "pilihanGanda" || s.tipe_soal === "teksSingkat"
+              ? s.pilihan.map((p) => ({
                 id: p.id,
                 text: p.text,
                 isCorrect: !!p.is_correct,
               }))
-            : [],
-      })),
+              : [],
+        };
+      }),
     });
   } catch (err) {
     console.error(err);
@@ -440,7 +518,7 @@ router.put("/:id", verifyAdmin, upload.any(), async (req, res) => {
     durasi,
     soalList,
     acakSoal,
-    acakOpsi, // NEW
+    acakOpsi,
   } = bodyData;
 
   if (
@@ -477,7 +555,7 @@ router.put("/:id", verifyAdmin, upload.any(), async (req, res) => {
         jamMulai,
         jamBerakhir,
         toBool(acakSoal) ? 1 : 0,
-        toBool(acakOpsi) ? 1 : 0, // NEW
+        toBool(acakOpsi) ? 1 : 0,
         parseInt(durasi, 10) || 0,
         id,
       ]
@@ -513,20 +591,33 @@ router.put("/:id", verifyAdmin, upload.any(), async (req, res) => {
             : null;
         const gambarPath = file ? `/uploads/${file.filename}` : gambarFromBody;
 
+        // --- LOGIKA BARU: SIAPKAN JSON CONFIG (UPDATE) ---
+        let fileConfigJSON = null;
+        if (s.tipeSoal === "soalDokumen") {
+          fileConfigJSON = JSON.stringify({
+            allowedTypes: s.allowedTypes || [],
+            maxSize: s.maxSize || 5,
+            maxCount: s.maxCount || 1
+          });
+        }
+        // -------------------------------------------------
+
         const kunci = (s.kunciJawabanText || "").trim();
         const correctIndex = Array.isArray(s.pilihan)
           ? s.pilihan.findIndex((t) => {
-              const teks = typeof t === "string" ? t : t?.text || "";
-              return teks.trim() === kunci;
-            })
+            const teks = typeof t === "string" ? t : t?.text || "";
+            return teks.trim() === kunci;
+          })
           : -1;
 
         if (typeof s.id === "number" && dbSoalIds.has(s.id)) {
           const qId = s.id;
 
+          // Update data pertanyaan termasuk file_config
+          const bobotUpdate = parseInt(s.bobot) || 1;
           await conn.execute(
-            "UPDATE questions SET tipe_soal = ?, soal_text = ?, gambar = ? WHERE id = ?",
-            [s.tipeSoal || "", s.soalText || "", gambarPath, qId]
+            "UPDATE questions SET tipe_soal = ?, soal_text = ?, gambar = ?, file_config = ?, bobot = ? WHERE id = ?",
+            [s.tipeSoal || "", s.soalText || "", gambarPath, fileConfigJSON, bobotUpdate, qId]
           );
 
           await conn.execute("DELETE FROM options WHERE question_id = ?", [
@@ -551,9 +642,11 @@ router.put("/:id", verifyAdmin, upload.any(), async (req, res) => {
             );
           }
         } else {
+          // Insert Soal Baru (saat edit)
+          const bobotNew = parseInt(s.bobot) || 1;
           const [qRes] = await conn.execute(
-            "INSERT INTO questions (exam_id, tipe_soal, soal_text, gambar) VALUES (?, ?, ?, ?)",
-            [id, s.tipeSoal || "", s.soalText || "", gambarPath]
+            "INSERT INTO questions (exam_id, tipe_soal, soal_text, gambar, file_config, bobot) VALUES (?, ?, ?, ?, ?, ?)",
+            [id, s.tipeSoal || "", s.soalText || "", gambarPath, fileConfigJSON, bobotNew]
           );
           const qId = qRes.insertId;
 
