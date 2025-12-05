@@ -114,28 +114,33 @@ const DaftarSoal = () => {
   // Helper Error Handler
   // =============================
   const handleError = (err) => {
-    console.error("Error:", err);
+    console.error("Error Fetch Ujian:", err);
 
     // Jika akun dinonaktifkan, biarkan main.jsx yang handle
     if (err.message === "Akun Anda telah dinonaktifkan.") return;
 
-    // JIKA TOKEN INVALID/EXPIRED: Langsung redirect ke login tanpa alert
+    // --- MODIFIKASI: JANGAN LANGSUNG LEMPAR DULU ---
+    // Cukup tampilkan pesan error, jangan hapus storage otomatis
+    // Kecuali Anda yakin 100% token benar-benar mati.
+    
     if (
       err.message.includes("Token tidak valid") ||
-      err.message.includes("kedaluwarsa") ||
       err.message.includes("Sesi telah berakhir")
     ) {
-      sessionStorage.removeItem("adminToken");
-      sessionStorage.removeItem("adminData");
-      navigate("/admin/login");
-      return;
+       // Opsional: Tampilkan notifikasi "Sesi habis" tapi jangan navigate paksa dulu
+       // untuk debugging. Jika sudah fix, boleh di-uncomment.
+       
+       // sessionStorage.removeItem("adminToken");
+       // sessionStorage.removeItem("adminData");
+       // navigate("/admin/login");
+       
+       setErrorMessage("Sesi backend menolak token. Coba refresh halaman.");
+       return;
     }
 
-    // Jika error lain, tampilkan toast merah
     setErrorMessage(err.message || "Terjadi kesalahan.");
     setTimeout(() => setErrorMessage(""), 4000);
   };
-
   // =============================
   // Ambil semua ujian
   // =============================

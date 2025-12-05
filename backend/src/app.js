@@ -18,10 +18,20 @@ const app = express();
 
 // Konfigurasi CORS
 app.use(cors({
-    origin: 'http://localhost:5173', // Sesuaikan dengan port frontend Anda
-    credentials: true, // Izinkan cookies/header otentikasi
+    origin: 'http://localhost:5173', 
+    credentials: true, 
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization']
+    // Tambahkan header yang kita kirim dari frontend di sini:
+    allowedHeaders: [
+      'Content-Type', 
+      'Authorization', 
+      'Cache-Control', // <--- PENTING
+      'Pragma',        // <--- PENTING
+      'Expires',       // <--- PENTING
+      'x-new-token'    // Opsional: jika nanti frontend perlu kirim balik token baru
+    ],
+    // Izinkan frontend membaca header custom dari backend (untuk sliding expiration)
+    exposedHeaders: ['x-new-token'] 
 }));
 
 app.use(express.json({ limit: '1mb' }));

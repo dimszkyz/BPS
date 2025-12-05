@@ -1,8 +1,9 @@
-// File: src/page/LoginAdmin.jsx (Tanpa Efek Blur & Overlay)
+// File: src/page/LoginAdmin.jsx
 import React, { useRef, useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { FaUserShield, FaKey, FaSignInAlt, FaEye, FaEyeSlash, FaSpinner } from "react-icons/fa";
 import ReCAPTCHA from "react-google-recaptcha";
+import { jwtDecode } from "jwt-decode"; // Pastikan import ini ada
 import Header from "../component/header";
 
 const API_URL = "http://localhost:5000";
@@ -24,9 +25,13 @@ const LoginAdmin = () => {
   const [bgLoading, setBgLoading] = useState(true);
 
   useEffect(() => {
+    // Bersihkan sesi lama saat halaman login dibuka
+    sessionStorage.clear();
+    localStorage.clear();
+
     const fetchBgSetting = async () => {
       try {
-        const res = await fetch(`${API_URL}/api/settings`);
+        const res = await fetch(`${API_URL}/api/settings?t=${Date.now()}`); // Cache busting
         const data = await res.json();
         if (data.adminBgImage) {
           setBgUrl(`${API_URL}${data.adminBgImage}`);
@@ -38,7 +43,7 @@ const LoginAdmin = () => {
       }
     };
     fetchBgSetting();
-  }, [API_URL]); // Menggunakan konstanta API_URL sebagai dependensi
+  }, []);
 
   const handleLogin = async (e) => {
     e.preventDefault();
@@ -55,51 +60,65 @@ const LoginAdmin = () => {
 
     setLoading(true);
     try {
-      const res = await fetch(`${API_URL}/api/admin/login`, {
+      // 1. Tambahkan timestamp (?t=...) untuk mencegah browser cache respons lama
+      const res = await fetch(`${API_URL}/api/admin/login?t=${Date.now()}`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { 
+          "Content-Type": "application/json",
+          "Cache-Control": "no-cache, no-store, must-revalidate", // Paksa request baru
+          "Pragma": "no-cache",
+          "Expires": "0"
+        },
         body: JSON.stringify({ username, password, captcha }),
       });
 
       let data = {};
       const text = await res.text();
-      if (text) {
-        try {
-          data = JSON.parse(text);
-        } catch {
-          console.error("Respons bukan JSON valid:", text);
-          setErrMsg("Terjadi kesalahan parsing respons.");
-          setLoading(false); // <-- Diperlukan di sini jika parsing gagal
-          if (recaptchaRef.current) {
-            recaptchaRef.current.reset();
-          }
-          setCaptcha(null);
-          return;
-        }
+      
+      try {
+        if (text) data = JSON.parse(text);
+      } catch {
+        console.error("Respons invalid:", text);
+        throw new Error("Terjadi kesalahan parsing respons server.");
       }
 
       if (!res.ok) throw new Error(data.message || "Gagal login.");
 
-      sessionStorage.clear(); 
-      localStorage.clear(); 
+      // 2. VALIDASI TOKEN: Cek apakah token yang diterima benar-benar BARU
+      const decoded = jwtDecode(data.token);
+      const currentTime = Date.now() / 1000;
+      
+      console.log("Login Token Check:", {
+        exp: decoded.exp,
+        now: currentTime,
+        isValid: decoded.exp > currentTime
+      });
 
+      if (decoded.exp < currentTime) {
+        throw new Error("Server memberikan token yang sudah kadaluwarsa. Periksa jam server.");
+      }
+
+      // 3. Simpan Token Baru
+      sessionStorage.clear(); // Pastikan bersih 100%
       sessionStorage.setItem("adminToken", data.token);
       sessionStorage.setItem("adminData", JSON.stringify(data.admin));
       
+      // 4. Beri waktu sedikit lebih lama agar storage tersinkronisasi
       setTimeout(() => {
-        navigate("/admin/dashboard");
-      }, 100);
+        navigate("/admin/dashboard", { replace: true });
+      }, 300); // Naikkan ke 300ms untuk keamanan
       
     } catch (err) {
       console.error(err);
       setErrMsg(err.message || "Terjadi kesalahan saat login.");
+      
+      // Reset captcha jika gagal
       if (recaptchaRef.current) {
         recaptchaRef.current.reset();
       }
       setCaptcha(null);
-      setLoading(false); // <-- PINDAHKAN KE SINI
+      setLoading(false);
     } 
-    // HAPUS BLOK 'finally' DARI SINI
   };
 
   const bgStyle = bgUrl ? { backgroundImage: `url(${bgUrl})` } : {};
@@ -207,12 +226,12 @@ const LoginAdmin = () => {
             </button>
           </form>
           <button
-  type="button"
-  onClick={() => navigate("/admin/lupa-password")}
-  className="text-sm text-indigo-600 hover:underline mt-2"
->
-  Lupa password?
-</button>
+            type="button"
+            onClick={() => navigate("/admin/lupa-password")}
+            className="text-sm text-indigo-600 hover:underline mt-2"
+          >
+            Lupa password?
+          </button>
         </div>
       </div>
 
